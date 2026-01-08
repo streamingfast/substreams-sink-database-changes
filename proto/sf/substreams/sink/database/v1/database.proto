@@ -41,4 +41,16 @@ message Field {
   string name = 1;
   string new_value = 2;
   string old_value = 3;
+
+  // UpdateOp specifies how the field value should be applied during UPSERT.
+  // Only used when TableChange.operation is OPERATION_UPSERT.
+  // Defaults to UPDATE_OP_SET if not specified.
+  enum UpdateOp {
+    UPDATE_OP_SET = 0;          // SET: column = new_value (default)
+    UPDATE_OP_ADD = 1;          // ADD: column = COALESCE(column, 0) + new_value
+    UPDATE_OP_MAX = 2;          // MAX: column = GREATEST(COALESCE(column, new_value), new_value)
+    UPDATE_OP_MIN = 3;          // MIN: column = LEAST(COALESCE(column, new_value), new_value)
+    UPDATE_OP_SET_IF_NULL = 4;  // SET_IF_NULL: column = COALESCE(column, new_value)
+  }
+  UpdateOp update_op = 4;
 }

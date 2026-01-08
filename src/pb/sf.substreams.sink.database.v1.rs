@@ -87,5 +87,53 @@ pub struct Field {
     pub new_value: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub old_value: ::prost::alloc::string::String,
+    #[prost(enumeration="field::UpdateOp", tag="4")]
+    pub update_op: i32,
+}
+/// Nested message and enum types in `Field`.
+pub mod field {
+    /// UpdateOp specifies how the field value should be applied during UPSERT.
+    /// Only used when TableChange.operation is OPERATION_UPSERT.
+    /// Defaults to UPDATE_OP_SET if not specified.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum UpdateOp {
+        /// SET: column = new_value (default)
+        Set = 0,
+        /// ADD: column = COALESCE(column, 0) + new_value
+        Add = 1,
+        /// MAX: column = GREATEST(COALESCE(column, new_value), new_value)
+        Max = 2,
+        /// MIN: column = LEAST(COALESCE(column, new_value), new_value)
+        Min = 3,
+        /// SET_IF_NULL: column = COALESCE(column, new_value)
+        SetIfNull = 4,
+    }
+    impl UpdateOp {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                UpdateOp::Set => "UPDATE_OP_SET",
+                UpdateOp::Add => "UPDATE_OP_ADD",
+                UpdateOp::Max => "UPDATE_OP_MAX",
+                UpdateOp::Min => "UPDATE_OP_MIN",
+                UpdateOp::SetIfNull => "UPDATE_OP_SET_IF_NULL",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "UPDATE_OP_SET" => Some(Self::Set),
+                "UPDATE_OP_ADD" => Some(Self::Add),
+                "UPDATE_OP_MAX" => Some(Self::Max),
+                "UPDATE_OP_MIN" => Some(Self::Min),
+                "UPDATE_OP_SET_IF_NULL" => Some(Self::SetIfNull),
+                _ => None,
+            }
+        }
+    }
 }
 // @@protoc_insertion_point(module)
