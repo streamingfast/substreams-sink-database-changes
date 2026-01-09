@@ -3,7 +3,32 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## v.3.0.0
+
+##
+
+* The `crate::pb::sf::substreams::sink::database::v1` package has been deprecated, use the full name like any other Protobuf packages we usually provide and which is now at `crate::pb::sf
+
+  Usually migrating is a single matter of a search/replace across your codebase:
+  - Replace all `substreams_database_change::pb::database::` by `substreams_database_change::pb::sf::substreams::sink::database::v1::`
+
+    So for example this code:
+
+    ```rust
+    use substreams_database_change::pb::database::{
+      field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
+    };
+    ```
+
+    Needs to become:
+
+    ```rust
+    use substreams_database_change::pb::sf::substreams::sink::database::v1::{
+      field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
+    };
+    ```
+
+## [3.0.0]
+
 * Bump substreams to 0.7.0
 
 ## [2.1.2]

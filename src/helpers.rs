@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::change::ToField;
-use crate::pb::database::{
+use crate::pb::sf::substreams::sink::database::v1::{
     table_change::{Operation, PrimaryKey},
     CompositePrimaryKey, DatabaseChanges, TableChange,
 };

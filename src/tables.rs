@@ -1,4 +1,6 @@
-use crate::pb::database::{table_change::Operation, field::UpdateOp, DatabaseChanges, Field, TableChange};
+use crate::pb::sf::substreams::sink::database::v1::{
+    field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
+};
 use std::collections::{BTreeMap, HashMap};
 use substreams::{
     scalar::{BigDecimal, BigInt},
@@ -8,7 +10,7 @@ use substreams::{
 #[derive(Debug)]
 pub struct Tables {
     // Map from table name to the primary keys within that table
-    pub tables: HashMap<String, Rows>,
+    tables: HashMap<String, Rows>,
 
     // Ordinal is used to track the order of changes, it is incremented for each row
     // in such way that at the end, we can correctly order the changes back correctly.
@@ -212,8 +214,7 @@ impl Tables {
                 for (field, field_value) in row.columns.into_iter() {
                     change.fields.push(Field {
                         name: field,
-                        new_value: field_value.value,
-                        old_value: "".to_string(),
+                        value: field_value.value,
                         update_op: field_value.update_op as i32,
                     });
                 }
@@ -228,14 +229,14 @@ impl Tables {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Ordinal(u64);
+struct Ordinal(u64);
 
 impl Ordinal {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Ordinal(0)
     }
 
-    pub fn next(&mut self) -> u64 {
+    fn next(&mut self) -> u64 {
         let current = self.0;
         self.0 += 1;
         current
@@ -289,13 +290,13 @@ impl<K: AsRef<str>, const N: usize> From<[(K, &str); N]> for PrimaryKey {
 }
 
 #[derive(Debug)]
-pub struct Rows {
+struct Rows {
     // Map of primary keys within this table, to the fields within
     pks: HashMap<PrimaryKey, Row>,
 }
 
 impl Rows {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Rows {
             pks: HashMap::new(),
         }
@@ -327,15 +328,10 @@ impl FieldValue {
 #[derive(Debug, Default)]
 pub struct Row {
     /// Verify that we don't try to delete the same row as we're creating it
-    pub operation: Operation,
+    operation: Operation,
     /// Map of field name to its value and update operation
     #[allow(private_interfaces)]
-    pub columns: HashMap<String, FieldValue>,
-    /// Finalized: Last update or delete
-    #[deprecated(
-        note = "The finalization state is now implicitly handled by the `operation` field."
-    )]
-    pub finalized: bool,
+    columns: HashMap<String, FieldValue>,
 
     ordinal: u64,
 }
@@ -402,21 +398,16 @@ impl Row {
                 panic!(
                     "cannot call set() on field '{}' after {}() - set() must be called first",
                     name,
-                    match existing.update_op {
-                        UpdateOp::Add => "add/sub",
-                        UpdateOp::Max => "max",
-                        UpdateOp::Min => "min",
-                        UpdateOp::SetIfNull => "set_if_null",
-                        UpdateOp::Set => unreachable!(),
-                    }
+                    existing.update_op.as_display_name(),
                 )
             }
         }
-        self.columns.insert(name.to_string(), FieldValue::new(value.to_value()));
+        self.columns
+            .insert(name.to_string(), FieldValue::new(value.to_value()));
         self
     }
 
-    /// Add to the existing value: column = COALESCE(column, 0) + new_value
+    /// Add to the existing value: column = COALESCE(column, 0) + value
     /// Used with upsert_row() for accumulating values like counters or balances.
     /// If called multiple times for the same column within a block, values are accumulated.
     pub fn add<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
@@ -427,7 +418,7 @@ impl Row {
         self
     }
 
-    /// Subtract from the existing value: column = COALESCE(column, 0) - new_value
+    /// Subtract from the existing value: column = COALESCE(column, 0) - value
     /// Convenience method that negates the value and uses ADD operation.
     /// If called multiple times for the same column within a block, values are accumulated.
     pub fn sub<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
@@ -446,25 +437,7 @@ impl Row {
     fn accumulate_add(&mut self, name: &str, value: &str, negate: bool) {
         use std::str::FromStr;
 
-        // Check for invalid transitions first
-        if let Some(existing) = self.columns.get(name) {
-            match existing.update_op {
-                UpdateOp::Set | UpdateOp::Add => {} // Valid transitions
-                UpdateOp::Max => panic!(
-                    "cannot call add/sub() on field '{}' after max() - incompatible operations",
-                    name
-                ),
-                UpdateOp::Min => panic!(
-                    "cannot call add/sub() on field '{}' after min() - incompatible operations",
-                    name
-                ),
-                UpdateOp::SetIfNull => panic!(
-                    "cannot call add/sub() on field '{}' after set_if_null() - incompatible operations",
-                    name
-                ),
-            }
-        }
-
+        // Parse and prepare the new value first
         let value_str = if negate {
             if value.starts_with('-') {
                 value[1..].to_string()
@@ -475,24 +448,56 @@ impl Row {
             value.to_string()
         };
 
-        let new_decimal = BigDecimal::from_str(&value_str)
-            .unwrap_or_else(|_| panic!("add/sub() requires a valid numeric value for field '{}', got: {}", name, value));
+        let new_decimal = BigDecimal::from_str(&value_str).unwrap_or_else(|_| {
+            panic!(
+                "add/sub() requires a valid numeric value for field '{}', got: {}",
+                name, value
+            )
+        });
 
-        if let Some(existing) = self.columns.get(name) {
-            if existing.update_op == UpdateOp::Set || existing.update_op == UpdateOp::Add {
-                let existing_decimal = BigDecimal::from_str(&existing.value)
-                    .expect("existing value should be valid BigDecimal");
-                let result = existing_decimal + new_decimal.clone();
-                // Keep existing op: Set stays Set (full value), Add stays Add (delta)
-                self.columns.insert(name.to_string(), FieldValue::with_op(result.to_string(), existing.update_op));
-                return;
+        // Use get_mut to check, validate, and update in one pass
+        match self.columns.get_mut(name) {
+            Some(existing) => {
+                // Validate operation compatibility
+                match existing.update_op {
+                    UpdateOp::Unspecified => panic!(
+                        "cannot call add/sub() on field '{}' after unspecified - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Set | UpdateOp::Add => {
+                        // Valid transitions - accumulate the values
+                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                            .expect("existing value should be valid BigDecimal");
+                        let result = existing_decimal + new_decimal;
+                        // Keep existing op: Set stays Set (full value), Add stays Add (delta)
+                        existing.value = result.to_string();
+                        // existing.update_op stays the same
+                    }
+                    UpdateOp::Max => panic!(
+                        "cannot call add/sub() on field '{}' after max() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Min => panic!(
+                        "cannot call add/sub() on field '{}' after min() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::SetIfNull => panic!(
+                        "cannot call add/sub() on field '{}' after set_if_null() - incompatible operations",
+                        name
+                    ),
+                }
+            }
+            None => {
+                // No existing value - insert new entry with Add operation
+                self.columns.insert(
+                    name.to_string(),
+                    FieldValue::with_op(new_decimal.to_string(), UpdateOp::Add),
+                );
             }
         }
-
-        self.columns.insert(name.to_string(), FieldValue::with_op(new_decimal.to_string(), UpdateOp::Add));
     }
 
-    /// Set to the maximum of existing and new: column = GREATEST(COALESCE(column, new_value), new_value)
+    /// Set to the maximum of existing and new: column = GREATEST(COALESCE(column, value), value)
     /// Used with upsert_row() for tracking high values.
     /// Can only follow set() or another max() call on the same field.
     pub fn max<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
@@ -500,39 +505,61 @@ impl Row {
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
+
+        // Parse the new value first
         let new_value = value.to_value();
-        let new_decimal = BigDecimal::from_str(&new_value)
-            .unwrap_or_else(|_| panic!("max() requires a valid numeric value for field '{}', got: {}", name, new_value));
-        // Check for invalid transitions and compute maximum if there's an existing value
-        if let Some(existing) = self.columns.get(name) {
-            match existing.update_op {
-                UpdateOp::Set | UpdateOp::Max => {
-                    // Compute the maximum of existing and new values
-                    let existing_decimal = BigDecimal::from_str(&existing.value)
-                        .expect("existing value should be valid BigDecimal");
-                    let max_val = if new_decimal > existing_decimal { new_value } else { existing.value.clone() };
-                    self.columns.insert(name.to_string(), FieldValue::with_op(max_val, UpdateOp::Max));
-                    return self;
+        let new_decimal = BigDecimal::from_str(&new_value).unwrap_or_else(|_| {
+            panic!(
+                "max() requires a valid numeric value for field '{}', got: {}",
+                name, new_value
+            )
+        });
+
+        // Use get_mut to check, validate, and update in one pass
+        match self.columns.get_mut(name) {
+            Some(existing) => {
+                match existing.update_op {
+                    UpdateOp::Unspecified => panic!(
+                        "cannot call max() on field '{}' after unspecified - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Set | UpdateOp::Max => {
+                        // Compute the maximum of existing and new values
+                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                            .expect("existing value should be valid BigDecimal");
+                        if new_decimal > existing_decimal {
+                            // New value is greater - update to new value
+                            existing.value = new_value;
+                        }
+                        // else: existing value is already the maximum, no change needed
+                        existing.update_op = UpdateOp::Max;
+                    }
+                    UpdateOp::Add => panic!(
+                        "cannot call max() on field '{}' after add/sub() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Min => panic!(
+                        "cannot call max() on field '{}' after min() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::SetIfNull => panic!(
+                        "cannot call max() on field '{}' after set_if_null() - incompatible operations",
+                        name
+                    ),
                 }
-                UpdateOp::Add => panic!(
-                    "cannot call max() on field '{}' after add/sub() - incompatible operations",
-                    name
-                ),
-                UpdateOp::Min => panic!(
-                    "cannot call max() on field '{}' after min() - incompatible operations",
-                    name
-                ),
-                UpdateOp::SetIfNull => panic!(
-                    "cannot call max() on field '{}' after set_if_null() - incompatible operations",
-                    name
-                ),
+            }
+            None => {
+                // No existing value - insert new entry with Max operation
+                self.columns.insert(
+                    name.to_string(),
+                    FieldValue::with_op(new_value, UpdateOp::Max),
+                );
             }
         }
-        self.columns.insert(name.to_string(), FieldValue::with_op(new_value, UpdateOp::Max));
         self
     }
 
-    /// Set to the minimum of existing and new: column = LEAST(COALESCE(column, new_value), new_value)
+    /// Set to the minimum of existing and new: column = LEAST(COALESCE(column, value), value)
     /// Used with upsert_row() for tracking low values.
     /// Can only follow set() or another min() call on the same field.
     pub fn min<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
@@ -540,35 +567,56 @@ impl Row {
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
+
+        // Parse the new value first
         let new_value = value.to_value();
-        let new_decimal = BigDecimal::from_str(&new_value)
-            .unwrap_or_else(|_| panic!("min() requires a valid numeric value for field '{}', got: {}", name, new_value));
-        // Check for invalid transitions and compute minimum if there's an existing value
-        if let Some(existing) = self.columns.get(name) {
-            match existing.update_op {
-                UpdateOp::Set | UpdateOp::Min => {
-                    // Compute the minimum of existing and new values
-                    let existing_decimal = BigDecimal::from_str(&existing.value)
-                        .expect("existing value should be valid BigDecimal");
-                    let min_val = if new_decimal < existing_decimal { new_value } else { existing.value.clone() };
-                    self.columns.insert(name.to_string(), FieldValue::with_op(min_val, UpdateOp::Min));
-                    return self;
+        let new_decimal = BigDecimal::from_str(&new_value).unwrap_or_else(|_| {
+            panic!(
+                "min() requires a valid numeric value for field '{}', got: {}",
+                name, new_value
+            )
+        });
+
+        // Use get_mut to check, validate, and update in one pass
+        match self.columns.get_mut(name) {
+            Some(existing) => {
+                match existing.update_op {
+                    UpdateOp::Unspecified => panic!(
+                        "cannot call min() on field '{}' after unspecified - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Set | UpdateOp::Min => {
+                        // Compute the minimum of existing and new values
+                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                            .expect("existing value should be valid BigDecimal");
+
+                        if new_decimal < existing_decimal {
+                            existing.value = new_value;
+                        }
+                        existing.update_op = UpdateOp::Min;
+                    }
+                    UpdateOp::Add => panic!(
+                        "cannot call min() on field '{}' after add/sub() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Max => panic!(
+                        "cannot call min() on field '{}' after max() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::SetIfNull => panic!(
+                        "cannot call min() on field '{}' after set_if_null() - incompatible operations",
+                        name
+                    ),
                 }
-                UpdateOp::Add => panic!(
-                    "cannot call min() on field '{}' after add/sub() - incompatible operations",
-                    name
-                ),
-                UpdateOp::Max => panic!(
-                    "cannot call min() on field '{}' after max() - incompatible operations",
-                    name
-                ),
-                UpdateOp::SetIfNull => panic!(
-                    "cannot call min() on field '{}' after set_if_null() - incompatible operations",
-                    name
-                ),
+            }
+            None => {
+                // No existing value - insert new entry with Min operation
+                self.columns.insert(
+                    name.to_string(),
+                    FieldValue::with_op(new_value, UpdateOp::Min),
+                );
             }
         }
-        self.columns.insert(name.to_string(), FieldValue::with_op(new_value, UpdateOp::Min));
         self
     }
 
@@ -580,29 +628,48 @@ impl Row {
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-        // Check for invalid transitions
-        if let Some(existing) = self.columns.get(name) {
-            match existing.update_op {
-                UpdateOp::SetIfNull => return self, // Keep first value - subsequent calls are no-op
-                UpdateOp::Set => panic!(
-                    "cannot call set_if_null() on field '{}' after set() - incompatible operations",
-                    name
-                ),
-                UpdateOp::Add => panic!(
-                    "cannot call set_if_null() on field '{}' after add/sub() - incompatible operations",
-                    name
-                ),
-                UpdateOp::Max => panic!(
-                    "cannot call set_if_null() on field '{}' after max() - incompatible operations",
-                    name
-                ),
-                UpdateOp::Min => panic!(
-                    "cannot call set_if_null() on field '{}' after min() - incompatible operations",
-                    name
-                ),
+
+        // Parse the value first
+        let new_value = value.to_value();
+
+        // Use get_mut to check for existing value
+        match self.columns.get_mut(name) {
+            Some(existing) => {
+                match existing.update_op {
+                    UpdateOp::Unspecified => panic!(
+                        "cannot call set_if_null() on field '{}' after unspecified - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::SetIfNull => {
+                        // Keep first value - subsequent calls are no-op
+                        // No changes needed to existing
+                    }
+                    UpdateOp::Set => panic!(
+                        "cannot call set_if_null() on field '{}' after set() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Add => panic!(
+                        "cannot call set_if_null() on field '{}' after add/sub() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Max => panic!(
+                        "cannot call set_if_null() on field '{}' after max() - incompatible operations",
+                        name
+                    ),
+                    UpdateOp::Min => panic!(
+                        "cannot call set_if_null() on field '{}' after min() - incompatible operations",
+                        name
+                    ),
+                }
+            }
+            None => {
+                // No existing value - insert new entry with SetIfNull operation
+                self.columns.insert(
+                    name.to_string(),
+                    FieldValue::with_op(new_value, UpdateOp::SetIfNull),
+                );
             }
         }
-        self.columns.insert(name.to_string(), FieldValue::with_op(value.to_value(), UpdateOp::SetIfNull));
         self
     }
 
@@ -612,7 +679,8 @@ impl Row {
     ///
     /// This will be pass as a string to the database which will interpret it itself.
     pub fn set_raw(&mut self, name: &str, value: String) -> &mut Self {
-        self.columns.insert(name.to_string(), FieldValue::new(value));
+        self.columns
+            .insert(name.to_string(), FieldValue::new(value));
         self
     }
 
@@ -634,8 +702,10 @@ impl Row {
             .collect::<Vec<_>>()
             .join(",");
 
-        self.columns
-            .insert(name.to_string(), FieldValue::new(format!("'{{{}}}'", values)));
+        self.columns.insert(
+            name.to_string(),
+            FieldValue::new(format!("'{{{}}}'", values)),
+        );
         self
     }
 
@@ -742,9 +812,9 @@ impl<T: AsRef<[u8]>> ToDatabaseValue for &Hex<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::pb::database::table_change::PrimaryKey as PrimaryKeyProto;
-    use crate::pb::database::CompositePrimaryKey as CompositePrimaryKeyProto;
-    use crate::pb::database::{DatabaseChanges, TableChange};
+    use crate::pb::sf::substreams::sink::database::v1::table_change::PrimaryKey as PrimaryKeyProto;
+    use crate::pb::sf::substreams::sink::database::v1::CompositePrimaryKey as CompositePrimaryKeyProto;
+    use crate::pb::sf::substreams::sink::database::v1::{DatabaseChanges, TableChange};
     use crate::tables::PrimaryKey;
     use crate::tables::Tables;
     use crate::tables::ToDatabaseValue;
@@ -855,7 +925,7 @@ mod test {
 #[cfg(test)]
 mod update_op_tests {
     use super::*;
-    use crate::pb::database::field::UpdateOp;
+    use crate::pb::sf::substreams::sink::database::v1::field::UpdateOp;
 
     // ============================================================
     // Basic set() operation tests
@@ -1298,7 +1368,7 @@ mod update_op_tests {
     }
 
     #[test]
-    fn max_updates_when_new_value_is_greater() {
+    fn max_updates_when_value_is_greater() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.max("high_price", "50");
@@ -1338,7 +1408,7 @@ mod update_op_tests {
     }
 
     #[test]
-    fn min_updates_when_new_value_is_smaller() {
+    fn min_updates_when_value_is_smaller() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.min("low_price", "100");
@@ -1501,13 +1571,12 @@ mod update_op_tests {
 
         // Find balance field
         let balance_field = change.fields.iter().find(|f| f.name == "balance").unwrap();
-        assert_eq!(balance_field.new_value, "100");
+        assert_eq!(balance_field.value, "100");
         assert_eq!(balance_field.update_op, UpdateOp::Add as i32);
 
         // Find name field
         let name_field = change.fields.iter().find(|f| f.name == "name").unwrap();
-        assert_eq!(name_field.new_value, "MyToken");
+        assert_eq!(name_field.value, "MyToken");
         assert_eq!(name_field.update_op, UpdateOp::Set as i32);
     }
-
 }

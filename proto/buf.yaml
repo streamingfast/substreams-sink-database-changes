@@ -3,7 +3,7 @@ name: buf.build/streamingfast/substreams-sink-database-changes
 
 lint:
   use:
-    - DEFAULT
+    - STANDARD
 
 breaking:
   use:

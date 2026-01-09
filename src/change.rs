@@ -1,5 +1,5 @@
-use crate::pb::database::field::UpdateOp;
-use crate::pb::database::Field;
+use crate::pb::sf::substreams::sink::database::v1::field::UpdateOp;
+use crate::pb::sf::substreams::sink::database::v1::Field;
 use std::str;
 use substreams::pb::substreams::store_delta::Operation;
 use substreams::scalar::{BigDecimal, BigInt};
@@ -75,8 +75,7 @@ impl<T: AsString> ToField for (T, T) {
     fn to_field<N: AsRef<str>>(self, name: N) -> Field {
         Field {
             name: name.as_ref().to_string(),
-            old_value: self.0.as_string(),
-            new_value: self.1.as_string(),
+            value: self.1.as_string(),
             update_op: UpdateOp::Set as i32,
         }
     }
@@ -88,8 +87,7 @@ impl<T: AsString> ToField for (Option<T>, T) {
             (Some(old), new) => ToField::to_field((old, new), name),
             (None, new) => Field {
                 name: name.as_ref().to_string(),
-                old_value: "".to_string(),
-                new_value: new.as_string(),
+                value: new.as_string(),
                 update_op: UpdateOp::Set as i32,
             },
         }
@@ -100,10 +98,9 @@ impl<T: AsString> ToField for (T, Option<T>) {
     fn to_field<N: AsRef<str>>(self, name: N) -> Field {
         match self {
             (old, Some(new)) => ToField::to_field((old, new), name),
-            (old, None) => Field {
+            (_old, None) => Field {
                 name: name.as_ref().to_string(),
-                old_value: old.as_string(),
-                new_value: "".to_string(),
+                value: "".to_string(),
                 update_op: UpdateOp::Set as i32,
             },
         }
@@ -165,7 +162,7 @@ impl_to_field_from_delta_via_ref!(&DeltaString);
 #[cfg(test)]
 mod test {
     use crate::change::ToField;
-    use crate::pb::database::Field;
+    use crate::pb::sf::substreams::sink::database::v1::{field::UpdateOp, Field};
     use substreams::pb::substreams::store_delta::Operation;
     use substreams::scalar::{BigDecimal, BigInt};
     use substreams::store::{DeltaBigDecimal, DeltaBigInt, DeltaBool, DeltaBytes, DeltaString};
@@ -176,7 +173,7 @@ mod test {
     fn i32_change() {
         let i32_change = (None, 1i32);
         assert_eq!(
-            create_expected_field(FIELD_NAME, None, Some("1".to_string())),
+            create_expected_field(FIELD_NAME, Some("1".to_string())),
             i32_change.to_field(FIELD_NAME)
         );
     }
@@ -185,7 +182,7 @@ mod test {
     fn big_decimal_change() {
         let bd_change = (None, BigDecimal::from(1 as i32));
         assert_eq!(
-            create_expected_field(FIELD_NAME, None, Some("1".to_string())),
+            create_expected_field(FIELD_NAME, Some("1".to_string())),
             bd_change.to_field(FIELD_NAME)
         );
     }
@@ -201,7 +198,7 @@ mod test {
         };
 
         assert_eq!(
-            create_expected_field(FIELD_NAME, Some("10".to_string()), Some("20".to_string())),
+            create_expected_field(FIELD_NAME, Some("20".to_string())),
             delta.to_field(FIELD_NAME)
         );
     }
@@ -210,7 +207,7 @@ mod test {
     fn big_int_change() {
         let bi_change = (None, BigInt::from(1 as i32));
         assert_eq!(
-            create_expected_field(FIELD_NAME, None, Some("1".to_string())),
+            create_expected_field(FIELD_NAME, Some("1".to_string())),
             bi_change.to_field(FIELD_NAME)
         );
     }
@@ -226,7 +223,7 @@ mod test {
         };
 
         assert_eq!(
-            create_expected_field(FIELD_NAME, Some("10".to_string()), Some("20".to_string())),
+            create_expected_field(FIELD_NAME, Some("20".to_string())),
             delta.to_field(FIELD_NAME)
         );
     }
@@ -235,7 +232,7 @@ mod test {
     fn string_change() {
         let string_change = (None, String::from("string"));
         assert_eq!(
-            create_expected_field(FIELD_NAME, None, Some("string".to_string())),
+            create_expected_field(FIELD_NAME, Some("string".to_string())),
             string_change.to_field(FIELD_NAME)
         );
     }
@@ -251,11 +248,7 @@ mod test {
         };
 
         assert_eq!(
-            create_expected_field(
-                FIELD_NAME,
-                Some("string1".to_string()),
-                Some("string2".to_string())
-            ),
+            create_expected_field(FIELD_NAME, Some("string2".to_string())),
             delta.to_field(FIELD_NAME)
         );
     }
@@ -264,7 +257,7 @@ mod test {
     fn bytes_change() {
         let bytes_change: (Option<Vec<u8>>, Vec<u8>) = (None, Vec::from("bytes"));
         assert_eq!(
-            create_expected_field(FIELD_NAME, None, Some("6279746573".to_string())),
+            create_expected_field(FIELD_NAME, Some("6279746573".to_string())),
             bytes_change.to_field(FIELD_NAME)
         );
     }
@@ -280,11 +273,7 @@ mod test {
         };
 
         assert_eq!(
-            create_expected_field(
-                FIELD_NAME,
-                Some("627974657331".to_string()),
-                Some("627974657332".to_string())
-            ),
+            create_expected_field(FIELD_NAME, Some("627974657332".to_string())),
             delta.to_field(FIELD_NAME)
         );
     }
@@ -293,7 +282,7 @@ mod test {
     fn bool_change() {
         let bool_change = (None, true);
         assert_eq!(
-            create_expected_field(FIELD_NAME, None, Some("true".to_string())),
+            create_expected_field(FIELD_NAME, Some("true".to_string())),
             bool_change.to_field(FIELD_NAME)
         );
     }
@@ -309,25 +298,19 @@ mod test {
         };
 
         assert_eq!(
-            create_expected_field(FIELD_NAME, Some(true.to_string()), Some(false.to_string()),),
+            create_expected_field(FIELD_NAME, Some(false.to_string()),),
             delta.to_field(FIELD_NAME)
         );
     }
 
-    fn create_expected_field<N: AsRef<str>>(
-        name: N,
-        old_value: Option<String>,
-        new_value: Option<String>,
-    ) -> Field {
+    fn create_expected_field<N: AsRef<str>>(name: N, value: Option<String>) -> Field {
         let mut field = Field {
             name: name.as_ref().to_string(),
-            ..Default::default()
+            update_op: UpdateOp::Set as i32,
+            value: "".to_string(),
         };
-        if old_value.is_some() {
-            field.old_value = old_value.unwrap()
-        }
-        if new_value.is_some() {
-            field.new_value = new_value.unwrap()
+        if value.is_some() {
+            field.value = value.unwrap()
         }
         field
     }

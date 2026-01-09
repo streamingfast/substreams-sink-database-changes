@@ -24,8 +24,8 @@ cargo add substreams-database-change
 
 ```toml
 [dependencies]
-substreams = "0.6"
-substreams-database-change = "2.0"
+substreams = "0.7"
+substreams-database-change = "4.0"
 ```
 
 **src/lib.rs**
