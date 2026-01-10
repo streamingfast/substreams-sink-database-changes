@@ -1,3 +1,4 @@
+use crate::numeric::NumericAddable;
 use crate::pb::sf::substreams::sink::database::v1::{
     field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
 };
@@ -410,22 +411,22 @@ impl Row {
     /// Add to the existing value: column = COALESCE(column, 0) + value
     /// Used with upsert_row() for accumulating values like counters or balances.
     /// If called multiple times for the same column within a block, values are accumulated.
-    pub fn add<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
+    pub fn add<T: NumericAddable>(&mut self, name: &str, value: T) -> &mut Self {
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-        self.accumulate_add(name, &value.to_value(), false);
+        self.accumulate_add(name, value, false);
         self
     }
 
     /// Subtract from the existing value: column = COALESCE(column, 0) - value
     /// Convenience method that negates the value and uses ADD operation.
     /// If called multiple times for the same column within a block, values are accumulated.
-    pub fn sub<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
+    pub fn sub<T: NumericAddable>(&mut self, name: &str, value: T) -> &mut Self {
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-        self.accumulate_add(name, &value.to_value(), true);
+        self.accumulate_add(name, value, true);
         self
     }
 
@@ -434,45 +435,28 @@ impl Row {
     /// - Add + Add/Sub: accumulate values, keep Add op (delta for UPDATE)
     /// - No existing: store as Add op (delta)
     /// - Other existing ops (Max/Min/SetIfNull): PANIC (invalid transition)
-    fn accumulate_add(&mut self, name: &str, value: &str, negate: bool) {
+    fn accumulate_add<T: NumericAddable>(&mut self, name: &str, value: T, subtract: bool) {
         use std::str::FromStr;
 
-        // Parse and prepare the new value first
-        let value_str = if negate {
-            if value.starts_with('-') {
-                value[1..].to_string()
-            } else {
-                format!("-{}", value)
-            }
-        } else {
-            value.to_string()
-        };
-
-        let new_decimal = BigDecimal::from_str(&value_str).unwrap_or_else(|_| {
-            panic!(
-                "add/sub() requires a valid numeric value for field '{}', got: {}",
-                name, value
-            )
-        });
-
-        // Use get_mut to check, validate, and update in one pass
         match self.columns.get_mut(name) {
             Some(existing) => {
-                // Validate operation compatibility
                 match existing.update_op {
                     UpdateOp::Unspecified => panic!(
                         "cannot call add/sub() on field '{}' after unspecified - incompatible operations",
                         name
                     ),
                     UpdateOp::Set | UpdateOp::Add => {
-                        // Valid transitions - accumulate the values
-                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                        // Parse existing value to BigDecimal once
+                        let mut target = BigDecimal::from_str(&existing.value)
                             .expect("existing value should be valid BigDecimal");
-                        let result = existing_decimal + new_decimal;
-                        // Keep existing op: Set stays Set (full value), Add stays Add (delta)
-                        existing.value = result.to_string();
-                        // existing.update_op stays the same
-                    }
+
+                        if subtract {
+                            value.sub_assign_from(&mut target);
+                        } else {
+                            value.add_assign_to(&mut target);
+                        }
+
+                        existing.value = target.to_string();                    }
                     UpdateOp::Max => panic!(
                         "cannot call add/sub() on field '{}' after max() - incompatible operations",
                         name
@@ -488,10 +472,15 @@ impl Row {
                 }
             }
             None => {
-                // No existing value - insert new entry with Add operation
+                let mut target = value.to_big_decimal();
+
+                if subtract {
+                    target = -target;
+                }
+
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(new_decimal.to_string(), UpdateOp::Add),
+                    FieldValue::with_op(target.to_string(), UpdateOp::Add),
                 );
             }
         }
