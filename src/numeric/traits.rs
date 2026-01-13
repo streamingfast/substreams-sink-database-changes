@@ -38,7 +38,7 @@ pub trait NumericAddable: ToBigDecimal {
 ///
 /// This trait leverages BigDecimal's native PartialOrd implementations for primitive
 /// types, enabling zero-allocation comparisons for integers.
-pub trait NumericComparable {
+pub trait NumericComparable: ToBigDecimal {
     /// Compare self against a BigDecimal value
     ///
     /// For primitive integers, this uses BigDecimal's native PartialOrd implementation
