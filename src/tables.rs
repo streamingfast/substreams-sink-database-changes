@@ -1,7 +1,8 @@
-use crate::numeric::NumericAddable;
+use crate::numeric::{NumericAddable, NumericComparable};
 use crate::pb::sf::substreams::sink::database::v1::{
     field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
 };
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use substreams::{
     scalar::{BigDecimal, BigInt},
@@ -489,20 +490,11 @@ impl Row {
     /// Set to the maximum of existing and new: column = GREATEST(COALESCE(column, value), value)
     /// Used with upsert_row() for tracking high values.
     /// Can only follow set() or another max() call on the same field.
-    pub fn max<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
+    pub fn max<T: NumericComparable + ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
         use std::str::FromStr;
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-
-        // Parse the new value first
-        let new_value = value.to_value();
-        let new_decimal = BigDecimal::from_str(&new_value).unwrap_or_else(|_| {
-            panic!(
-                "max() requires a valid numeric value for field '{}', got: {}",
-                name, new_value
-            )
-        });
 
         // Use get_mut to check, validate, and update in one pass
         match self.columns.get_mut(name) {
@@ -514,11 +506,13 @@ impl Row {
                     ),
                     UpdateOp::Set | UpdateOp::Max => {
                         // Compute the maximum of existing and new values
-                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                        let existing_bd = BigDecimal::from_str(&existing.value)
                             .expect("existing value should be valid BigDecimal");
-                        if new_decimal > existing_decimal {
+                        
+                        // Direct comparison - zero allocation for integers!
+                        if value.cmp_to_big_decimal(&existing_bd) == Ordering::Greater {
                             // New value is greater - update to new value
-                            existing.value = new_value;
+                            existing.value = value.to_value();
                         }
                         // else: existing value is already the maximum, no change needed
                         existing.update_op = UpdateOp::Max;
@@ -541,7 +535,7 @@ impl Row {
                 // No existing value - insert new entry with Max operation
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(new_value, UpdateOp::Max),
+                    FieldValue::with_op(value.to_value(), UpdateOp::Max),
                 );
             }
         }
@@ -551,20 +545,11 @@ impl Row {
     /// Set to the minimum of existing and new: column = LEAST(COALESCE(column, value), value)
     /// Used with upsert_row() for tracking low values.
     /// Can only follow set() or another min() call on the same field.
-    pub fn min<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
+    pub fn min<T: NumericComparable + ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
         use std::str::FromStr;
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-
-        // Parse the new value first
-        let new_value = value.to_value();
-        let new_decimal = BigDecimal::from_str(&new_value).unwrap_or_else(|_| {
-            panic!(
-                "min() requires a valid numeric value for field '{}', got: {}",
-                name, new_value
-            )
-        });
 
         // Use get_mut to check, validate, and update in one pass
         match self.columns.get_mut(name) {
@@ -576,11 +561,12 @@ impl Row {
                     ),
                     UpdateOp::Set | UpdateOp::Min => {
                         // Compute the minimum of existing and new values
-                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                        let existing_bd = BigDecimal::from_str(&existing.value)
                             .expect("existing value should be valid BigDecimal");
 
-                        if new_decimal < existing_decimal {
-                            existing.value = new_value;
+                        // Direct comparison - zero allocation for integers!
+                        if value.cmp_to_big_decimal(&existing_bd) == Ordering::Less {
+                            existing.value = value.to_value();
                         }
                         existing.update_op = UpdateOp::Min;
                     }
@@ -602,7 +588,7 @@ impl Row {
                 // No existing value - insert new entry with Min operation
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(new_value, UpdateOp::Min),
+                    FieldValue::with_op(value.to_value(), UpdateOp::Min),
                 );
             }
         }

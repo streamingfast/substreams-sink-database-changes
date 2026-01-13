@@ -1,4 +1,4 @@
 mod impls;
 mod traits;
 
-pub use traits::{NumericAddable, ToBigDecimal};
+pub use traits::{NumericAddable, NumericComparable, ToBigDecimal};

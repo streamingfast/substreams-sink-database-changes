@@ -1,4 +1,5 @@
-use crate::numeric::{NumericAddable, ToBigDecimal};
+use crate::numeric::{NumericAddable, NumericComparable, ToBigDecimal};
+use std::cmp::Ordering;
 use std::str::FromStr;
 use substreams::scalar::{BigDecimal, BigInt};
 
@@ -155,3 +156,103 @@ macro_rules! impl_numeric_for_string {
 
 // Apply to String and &str types
 impl_numeric_for_string!(String, &str);
+
+// ============================================================
+// NumericComparable implementations
+// ============================================================
+
+// Macro for implementing NumericComparable on integer types using BigDecimal's native PartialOrd
+macro_rules! impl_numeric_comparable_for_integer {
+    ($($t:ty),*) => {
+        $(
+            impl NumericComparable for $t {
+                fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+                    // Direct comparison using BigDecimal's PartialOrd<$t>
+                    // This is zero-allocation for integers
+                    self.partial_cmp(other)
+                        .expect("BigDecimal comparison should always succeed for integers")
+                }
+            }
+        )*
+    };
+}
+
+// Apply to all primitive integer types
+impl_numeric_comparable_for_integer!(i8, i16, i32, i64, u8, u16, u32, u64);
+
+// Specialized implementations for isize/usize (cast to i64/u64)
+impl NumericComparable for isize {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        (*self as i64).partial_cmp(other)
+            .expect("BigDecimal comparison should always succeed for integers")
+    }
+}
+
+impl NumericComparable for usize {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        (*self as u64).partial_cmp(other)
+            .expect("BigDecimal comparison should always succeed for integers")
+    }
+}
+
+// i128 and u128 - use BigDecimal's native PartialOrd for these types
+impl NumericComparable for i128 {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        self.partial_cmp(other)
+            .expect("BigDecimal comparison should always succeed for i128")
+    }
+}
+
+impl NumericComparable for u128 {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        self.partial_cmp(other)
+            .expect("BigDecimal comparison should always succeed for u128")
+    }
+}
+
+// BigDecimal implementations
+impl NumericComparable for BigDecimal {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        self.cmp(other)
+    }
+}
+
+impl NumericComparable for &BigDecimal {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        (*self).cmp(other)
+    }
+}
+
+// BigInt implementations - convert to BigDecimal for comparison
+impl NumericComparable for BigInt {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        let self_bd = BigDecimal::from(self.clone());
+        self_bd.cmp(other)
+    }
+}
+
+impl NumericComparable for &BigInt {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        let self_bd = BigDecimal::from((*self).clone());
+        self_bd.cmp(other)
+    }
+}
+
+// String implementations - must parse to BigDecimal
+impl NumericComparable for String {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        let self_bd = BigDecimal::from_str(self).unwrap_or_else(|_| {
+            panic!("min/max() requires a valid numeric value, got: {}", self)
+        });
+        self_bd.cmp(other)
+    }
+}
+
+impl NumericComparable for &str {
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering {
+        let self_bd = BigDecimal::from_str(self).unwrap_or_else(|_| {
+            panic!("min/max() requires a valid numeric value, got: {}", self)
+        });
+        self_bd.cmp(other)
+    }
+}
