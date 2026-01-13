@@ -1554,4 +1554,192 @@ mod update_op_tests {
         assert_eq!(name_field.value, "MyToken");
         assert_eq!(name_field.update_op, UpdateOp::Set as i32);
     }
+
+    // ============================================================
+    // NumericComparable tests - verifying zero-allocation integer comparisons
+    // ============================================================
+
+    #[test]
+    fn max_with_i64_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100i64);
+        row.max("value", 50i64);
+        row.max("value", 200i64);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_i64_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100i64);
+        row.min("value", 50i64);
+        row.min("value", 200i64);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_u32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100u32);
+        row.max("value", 50u32);
+        row.max("value", 200u32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_u32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100u32);
+        row.min("value", 50u32);
+        row.min("value", 200u32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_i32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100i32);
+        row.max("value", -50i32);
+        row.max("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_i32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100i32);
+        row.min("value", -50i32);
+        row.min("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "-50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_mixed_integer_types() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100i64);
+        row.max("value", 50u32);
+        row.max("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_mixed_integer_types() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100i64);
+        row.min("value", 50u32);
+        row.min("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_bigdecimal() {
+        use std::str::FromStr;
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", BigDecimal::from_str("100.5").unwrap());
+        row.max("value", BigDecimal::from_str("50.25").unwrap());
+        row.max("value", BigDecimal::from_str("200.75").unwrap());
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200.75");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_bigdecimal() {
+        use std::str::FromStr;
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", BigDecimal::from_str("100.5").unwrap());
+        row.min("value", BigDecimal::from_str("50.25").unwrap());
+        row.min("value", BigDecimal::from_str("200.75").unwrap());
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50.25");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_bigint() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", BigInt::from(100));
+        row.max("value", BigInt::from(50));
+        row.max("value", BigInt::from(200));
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_bigint() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", BigInt::from(100));
+        row.min("value", BigInt::from(50));
+        row.min("value", BigInt::from(200));
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_string_still_works() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", "100");
+        row.max("value", "50");
+        row.max("value", "200");
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_string_still_works() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", "100");
+        row.min("value", "50");
+        row.min("value", "200");
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
 }
