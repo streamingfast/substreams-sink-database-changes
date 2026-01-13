@@ -25,10 +25,12 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "bigdecimal"
-version = "0.3.1"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6773ddc0eafc0e509fb60e48dff7f450f8e674a0686ae8605e8d9901bd5eefa"
+checksum = "4d6867f1565b3aad85681f1015055b087fcfd840d6aeee6eee7f2da317603695"
 dependencies = [
+ "autocfg",
+ "libm",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -194,6 +196,12 @@ name = "libc"
 version = "0.2.159"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "561d97a539a36e26a9a5fad1ea11a3039a67714694aaa379433e580854bc3dc5"
+
+[[package]]
+name = "libm"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "linux-raw-sys"
@@ -474,9 +482,9 @@ dependencies = [
 
 [[package]]
 name = "substreams"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7df8b2e136c28517a6c77c9f592ed65843c866faf7f87b50fdf1f432629c16eb"
+checksum = "237c36dcd8e85d408b5e0c321a01f39c61e81290575896d76c29d522c08f1a39"
 dependencies = [
  "anyhow",
  "bigdecimal",
@@ -507,9 +515,9 @@ dependencies = [
 
 [[package]]
 name = "substreams-macro"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d9d832bcc7ca01a2bf1636264f390ef00c6d5191b45f615221b012109863712"
+checksum = "3d7bfbb0312ace6c30b7074e472177d378b0e60c6a0319b1387aaa757385ebba"
 dependencies = [
  "proc-macro2",
  "quote",
