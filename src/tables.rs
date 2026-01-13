@@ -1742,4 +1742,28 @@ mod update_op_tests {
         assert_eq!(field.value, "50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
+
+    // ============================================================
+    // Verification tests for comparison semantics
+    // ============================================================
+
+    #[test]
+    fn verify_integer_comparison_semantics() {
+        use std::str::FromStr;
+        use crate::numeric::NumericComparable;
+        
+        let bd_100 = BigDecimal::from_str("100").unwrap();
+        
+        // Test: 50 < 100 should return Less
+        assert_eq!(50i64.cmp_to_big_decimal(&bd_100), Ordering::Less);
+        
+        // Test: 200 > 100 should return Greater
+        assert_eq!(200i64.cmp_to_big_decimal(&bd_100), Ordering::Greater);
+        
+        // Test: 100 == 100 should return Equal
+        assert_eq!(100i64.cmp_to_big_decimal(&bd_100), Ordering::Equal);
+        
+        // Test with negative numbers
+        assert_eq!((-50i32).cmp_to_big_decimal(&bd_100), Ordering::Less);
+    }
 }
