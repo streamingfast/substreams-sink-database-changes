@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use substreams::scalar::BigDecimal;
 
 /// Trait for types that can be converted to BigDecimal
@@ -31,4 +32,16 @@ pub trait NumericAddable: ToBigDecimal {
     /// Equivalent to: `*target -= self`
     /// For example: `50i64.sub_assign_from(&mut target)` will subtract 50 from target.
     fn sub_assign_from(&self, target: &mut BigDecimal);
+}
+
+/// Trait for types that can be compared against a BigDecimal for min/max operations
+///
+/// This trait leverages BigDecimal's native PartialOrd implementations for primitive
+/// types, enabling zero-allocation comparisons for integers.
+pub trait NumericComparable: ToBigDecimal {
+    /// Compare self against a BigDecimal value
+    ///
+    /// For primitive integers, this uses BigDecimal's native PartialOrd implementation
+    /// which requires no allocation. For other types, conversion may be needed.
+    fn cmp_to_big_decimal(&self, other: &BigDecimal) -> Ordering;
 }

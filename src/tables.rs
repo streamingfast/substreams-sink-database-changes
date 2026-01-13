@@ -1,7 +1,8 @@
-use crate::numeric::NumericAddable;
+use crate::numeric::{NumericAddable, NumericComparable};
 use crate::pb::sf::substreams::sink::database::v1::{
     field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
 };
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use substreams::{
     scalar::{BigDecimal, BigInt},
@@ -489,20 +490,11 @@ impl Row {
     /// Set to the maximum of existing and new: column = GREATEST(COALESCE(column, value), value)
     /// Used with upsert_row() for tracking high values.
     /// Can only follow set() or another max() call on the same field.
-    pub fn max<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
+    pub fn max<T: NumericComparable>(&mut self, name: &str, value: T) -> &mut Self {
         use std::str::FromStr;
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-
-        // Parse the new value first
-        let new_value = value.to_value();
-        let new_decimal = BigDecimal::from_str(&new_value).unwrap_or_else(|_| {
-            panic!(
-                "max() requires a valid numeric value for field '{}', got: {}",
-                name, new_value
-            )
-        });
 
         // Use get_mut to check, validate, and update in one pass
         match self.columns.get_mut(name) {
@@ -514,11 +506,13 @@ impl Row {
                     ),
                     UpdateOp::Set | UpdateOp::Max => {
                         // Compute the maximum of existing and new values
-                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                        let existing_bd = BigDecimal::from_str(&existing.value)
                             .expect("existing value should be valid BigDecimal");
-                        if new_decimal > existing_decimal {
+                        
+                        // Direct comparison - zero allocation for integers!
+                        if value.cmp_to_big_decimal(&existing_bd) == Ordering::Greater {
                             // New value is greater - update to new value
-                            existing.value = new_value;
+                            existing.value = value.to_big_decimal().to_string();
                         }
                         // else: existing value is already the maximum, no change needed
                         existing.update_op = UpdateOp::Max;
@@ -541,7 +535,7 @@ impl Row {
                 // No existing value - insert new entry with Max operation
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(new_value, UpdateOp::Max),
+                    FieldValue::with_op(value.to_big_decimal().to_string(), UpdateOp::Max),
                 );
             }
         }
@@ -551,20 +545,11 @@ impl Row {
     /// Set to the minimum of existing and new: column = LEAST(COALESCE(column, value), value)
     /// Used with upsert_row() for tracking low values.
     /// Can only follow set() or another min() call on the same field.
-    pub fn min<T: ToDatabaseValue>(&mut self, name: &str, value: T) -> &mut Self {
+    pub fn min<T: NumericComparable>(&mut self, name: &str, value: T) -> &mut Self {
         use std::str::FromStr;
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-
-        // Parse the new value first
-        let new_value = value.to_value();
-        let new_decimal = BigDecimal::from_str(&new_value).unwrap_or_else(|_| {
-            panic!(
-                "min() requires a valid numeric value for field '{}', got: {}",
-                name, new_value
-            )
-        });
 
         // Use get_mut to check, validate, and update in one pass
         match self.columns.get_mut(name) {
@@ -576,11 +561,12 @@ impl Row {
                     ),
                     UpdateOp::Set | UpdateOp::Min => {
                         // Compute the minimum of existing and new values
-                        let existing_decimal = BigDecimal::from_str(&existing.value)
+                        let existing_bd = BigDecimal::from_str(&existing.value)
                             .expect("existing value should be valid BigDecimal");
 
-                        if new_decimal < existing_decimal {
-                            existing.value = new_value;
+                        // Direct comparison - zero allocation for integers!
+                        if value.cmp_to_big_decimal(&existing_bd) == Ordering::Less {
+                            existing.value = value.to_big_decimal().to_string();
                         }
                         existing.update_op = UpdateOp::Min;
                     }
@@ -602,7 +588,7 @@ impl Row {
                 // No existing value - insert new entry with Min operation
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(new_value, UpdateOp::Min),
+                    FieldValue::with_op(value.to_big_decimal().to_string(), UpdateOp::Min),
                 );
             }
         }
@@ -1107,7 +1093,7 @@ mod update_op_tests {
     fn max_then_set_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.max("price", "100");
+        row.max("price", 100i64);
         row.set("price", "999"); // Should panic
     }
 
@@ -1116,7 +1102,7 @@ mod update_op_tests {
     fn min_then_set_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.min("price", "100");
+        row.min("price", 100i64);
         row.set("price", "999"); // Should panic
     }
 
@@ -1138,7 +1124,7 @@ mod update_op_tests {
     fn max_then_add_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.max("x", "100");
+        row.max("x", 100i64);
         row.add("x", "50"); // Should panic
     }
 
@@ -1147,7 +1133,7 @@ mod update_op_tests {
     fn min_then_add_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.min("x", "100");
+        row.min("x", 100i64);
         row.add("x", "50"); // Should panic
     }
 
@@ -1166,7 +1152,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.add("x", "100");
-        row.max("x", "50"); // Should panic
+        row.max("x", 50i64); // Should panic
     }
 
     #[test]
@@ -1174,8 +1160,8 @@ mod update_op_tests {
     fn min_then_max_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.min("x", "100");
-        row.max("x", "50"); // Should panic
+        row.min("x", 100i64);
+        row.max("x", 50i64); // Should panic
     }
 
     #[test]
@@ -1184,7 +1170,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.add("x", "100");
-        row.min("x", "50"); // Should panic
+        row.min("x", 50i64); // Should panic
     }
 
     #[test]
@@ -1192,8 +1178,8 @@ mod update_op_tests {
     fn max_then_min_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.max("x", "100");
-        row.min("x", "50"); // Should panic
+        row.max("x", 100i64);
+        row.min("x", 50i64); // Should panic
     }
 
     #[test]
@@ -1210,7 +1196,7 @@ mod update_op_tests {
     fn max_then_set_if_null_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.max("x", "100");
+        row.max("x", 100i64);
         row.set_if_null("x", "50"); // Should panic
     }
 
@@ -1219,7 +1205,7 @@ mod update_op_tests {
     fn min_then_set_if_null_panics() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.min("x", "100");
+        row.min("x", 100i64);
         row.set_if_null("x", "50"); // Should panic
     }
 
@@ -1229,7 +1215,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set_if_null("x", "100");
-        row.max("x", "50"); // Should panic
+        row.max("x", 50i64); // Should panic
     }
 
     #[test]
@@ -1238,7 +1224,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set_if_null("x", "100");
-        row.min("x", "50"); // Should panic
+        row.min("x", 50i64); // Should panic
     }
 
     // ============================================================
@@ -1250,7 +1236,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set("price", "100");
-        row.max("price", "50");
+        row.max("price", 50i64);
 
         // max() computes max(100, 50) = 100
         let field = row.columns.get("price").unwrap();
@@ -1263,7 +1249,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set("price", "50");
-        row.max("price", "100");
+        row.max("price", 100i64);
 
         // max() computes max(50, 100) = 100
         let field = row.columns.get("price").unwrap();
@@ -1276,7 +1262,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set("price", "100");
-        row.min("price", "50");
+        row.min("price", 50i64);
 
         // min() computes min(100, 50) = 50
         let field = row.columns.get("price").unwrap();
@@ -1289,7 +1275,7 @@ mod update_op_tests {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set("price", "50");
-        row.min("price", "100");
+        row.min("price", 100i64);
 
         // min() computes min(50, 100) = 50
         let field = row.columns.get("price").unwrap();
@@ -1336,7 +1322,7 @@ mod update_op_tests {
     fn max_stores_with_max_op() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.max("high_price", "100");
+        row.max("high_price", 100i64);
 
         let field = row.columns.get("high_price").unwrap();
         assert_eq!(field.value, "100");
@@ -1347,8 +1333,8 @@ mod update_op_tests {
     fn max_computes_maximum_value() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.max("high_price", "100");
-        row.max("high_price", "50");
+        row.max("high_price", 100i64);
+        row.max("high_price", 50i64);
 
         // max() now computes the actual maximum in database-changes
         let field = row.columns.get("high_price").unwrap();
@@ -1360,8 +1346,8 @@ mod update_op_tests {
     fn max_updates_when_value_is_greater() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.max("high_price", "50");
-        row.max("high_price", "100");
+        row.max("high_price", 50i64);
+        row.max("high_price", 100i64);
 
         let field = row.columns.get("high_price").unwrap();
         assert_eq!(field.value, "100"); // Updates to 100 since it's greater than 50
@@ -1376,7 +1362,7 @@ mod update_op_tests {
     fn min_stores_with_min_op() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.min("low_price", "100");
+        row.min("low_price", 100i64);
 
         let field = row.columns.get("low_price").unwrap();
         assert_eq!(field.value, "100");
@@ -1387,8 +1373,8 @@ mod update_op_tests {
     fn min_computes_minimum_value() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.min("low_price", "50");
-        row.min("low_price", "100");
+        row.min("low_price", 50i64);
+        row.min("low_price", 100i64);
 
         // min() now computes the actual minimum in database-changes
         let field = row.columns.get("low_price").unwrap();
@@ -1400,8 +1386,8 @@ mod update_op_tests {
     fn min_updates_when_value_is_smaller() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
-        row.min("low_price", "100");
-        row.min("low_price", "50");
+        row.min("low_price", 100i64);
+        row.min("low_price", 50i64);
 
         let field = row.columns.get("low_price").unwrap();
         assert_eq!(field.value, "50"); // Updates to 50 since it's less than 100
@@ -1567,5 +1553,191 @@ mod update_op_tests {
         let name_field = change.fields.iter().find(|f| f.name == "name").unwrap();
         assert_eq!(name_field.value, "MyToken");
         assert_eq!(name_field.update_op, UpdateOp::Set as i32);
+    }
+
+    // ============================================================
+    // NumericComparable tests - verifying zero-allocation integer comparisons
+    // ============================================================
+
+    #[test]
+    fn max_with_i64_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100i64);
+        row.max("value", 50i64);
+        row.max("value", 200i64);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_i64_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100i64);
+        row.min("value", 50i64);
+        row.min("value", 200i64);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_u32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100u32);
+        row.max("value", 50u32);
+        row.max("value", 200u32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_u32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100u32);
+        row.min("value", 50u32);
+        row.min("value", 200u32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_i32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100i32);
+        row.max("value", -50i32);
+        row.max("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_i32_computes_correctly() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100i32);
+        row.min("value", -50i32);
+        row.min("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "-50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_mixed_integer_types() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", 100i64);
+        row.max("value", 50u32);
+        row.max("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_mixed_integer_types() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", 100i64);
+        row.min("value", 50u32);
+        row.min("value", 200i32);
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_bigdecimal() {
+        use std::str::FromStr;
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", BigDecimal::from_str("100.5").unwrap());
+        row.max("value", BigDecimal::from_str("50.25").unwrap());
+        row.max("value", BigDecimal::from_str("200.75").unwrap());
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200.75");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_bigdecimal() {
+        use std::str::FromStr;
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", BigDecimal::from_str("100.5").unwrap());
+        row.min("value", BigDecimal::from_str("50.25").unwrap());
+        row.min("value", BigDecimal::from_str("200.75").unwrap());
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50.25");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    #[test]
+    fn max_with_bigint() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.max("value", BigInt::from(100));
+        row.max("value", BigInt::from(50));
+        row.max("value", BigInt::from(200));
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "200");
+        assert_eq!(field.update_op, UpdateOp::Max);
+    }
+
+    #[test]
+    fn min_with_bigint() {
+        let mut tables = Tables::new();
+        let row = tables.upsert_row("test", "pk1");
+        row.min("value", BigInt::from(100));
+        row.min("value", BigInt::from(50));
+        row.min("value", BigInt::from(200));
+
+        let field = row.columns.get("value").unwrap();
+        assert_eq!(field.value, "50");
+        assert_eq!(field.update_op, UpdateOp::Min);
+    }
+
+    // ============================================================
+    // Verification tests for comparison semantics
+    // ============================================================
+
+    #[test]
+    fn verify_integer_comparison_semantics() {
+        use std::str::FromStr;
+        use crate::numeric::NumericComparable;
+        
+        let bd_100 = BigDecimal::from_str("100").unwrap();
+        
+        // Test: 50 < 100 should return Less
+        assert_eq!(50i64.cmp_to_big_decimal(&bd_100), Ordering::Less);
+        
+        // Test: 200 > 100 should return Greater
+        assert_eq!(200i64.cmp_to_big_decimal(&bd_100), Ordering::Greater);
+        
+        // Test: 100 == 100 should return Equal
+        assert_eq!(100i64.cmp_to_big_decimal(&bd_100), Ordering::Equal);
+        
+        // Test with negative numbers
+        assert_eq!((-50i32).cmp_to_big_decimal(&bd_100), Ordering::Less);
     }
 }
