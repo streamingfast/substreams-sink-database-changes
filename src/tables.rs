@@ -11,11 +11,11 @@ use substreams::{
 
 #[derive(Debug)]
 pub struct Tables {
-    // Map from table name to the primary keys within that table
+    /// Map from table name to the primary keys within that table
     tables: HashMap<String, Rows>,
 
-    // Ordinal is used to track the order of changes, it is incremented for each row
-    // in such way that at the end, we can correctly order the changes back correctly.
+    /// Ordinal is used to track the order of changes, it is incremented for each row
+    /// in such way that at the end, we can correctly order the changes back correctly.
     ordinal: Ordinal,
 }
 
@@ -51,10 +51,7 @@ impl Tables {
         let rows: &mut Rows = self.tables.entry(table.to_string()).or_insert(Rows::new());
         let k = key.into();
         let key_debug = format!("{:?}", k);
-        let row = rows
-            .pks
-            .entry(k)
-            .or_insert(Row::new_ordered(self.ordinal.next()));
+        let row = rows.pks.entry(k).or_insert(Row::new(self.ordinal.next()));
         match row.operation {
             Operation::Unspecified => {
                 row.operation = Operation::Create;
@@ -100,10 +97,7 @@ impl Tables {
         let rows = self.tables.entry(table.to_string()).or_insert(Rows::new());
         let k = key.into();
         let key_debug = format!("{:?}", k);
-        let row = rows
-            .pks
-            .entry(k)
-            .or_insert(Row::new_ordered(self.ordinal.next()));
+        let row = rows.pks.entry(k).or_insert(Row::new(self.ordinal.next()));
         match row.operation {
             Operation::Unspecified => {
                 row.operation = Operation::Upsert;
@@ -135,10 +129,7 @@ impl Tables {
         let rows = self.tables.entry(table.to_string()).or_insert(Rows::new());
         let k = key.into();
         let key_debug = format!("{:?}", k);
-        let row = rows
-            .pks
-            .entry(k)
-            .or_insert(Row::new_ordered(self.ordinal.next()));
+        let row = rows.pks.entry(k).or_insert(Row::new(self.ordinal.next()));
         match row.operation {
             Operation::Unspecified => {
                 row.operation = Operation::Update;
@@ -161,7 +152,7 @@ impl Tables {
         let row = rows
             .pks
             .entry(key.into())
-            .or_insert(Row::new_ordered(self.ordinal.next()));
+            .or_insert(Row::new(self.ordinal.next()));
 
         row.columns = HashMap::new();
         row.operation = match row.operation {
@@ -216,7 +207,7 @@ impl Tables {
                 for (field, field_value) in row.columns.into_iter() {
                     change.fields.push(Field {
                         name: field,
-                        value: field_value.value,
+                        value: field_value.value.into_string(),
                         update_op: field_value.update_op as i32,
                     });
                 }
@@ -306,24 +297,84 @@ impl Rows {
 }
 
 /// Holds field value and its update operation for UPSERT handling.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct FieldValue {
-    #[allow(dead_code)]
-    value: String,
-    #[allow(dead_code)]
+    value: FieldInnerValue,
     update_op: UpdateOp,
 }
 
 impl FieldValue {
     fn new(value: String) -> Self {
         FieldValue {
-            value,
+            value: FieldInnerValue::from_string(value),
             update_op: UpdateOp::Set,
         }
     }
 
+    fn new_numeric(value: BigDecimal, op: UpdateOp) -> Self {
+        FieldValue {
+            value: FieldInnerValue::Numeric(value),
+            update_op: op,
+        }
+    }
+
     fn with_op(value: String, update_op: UpdateOp) -> Self {
-        FieldValue { value, update_op }
+        FieldValue {
+            value: FieldInnerValue::from_string(value),
+            update_op,
+        }
+    }
+}
+
+/// Internal representation of field values that can be either text or numeric.
+/// Numeric values are stored as BigDecimal to avoid repeated parsing during
+/// accumulation operations (add/sub/max/min).
+#[derive(Debug, Clone)]
+enum FieldInnerValue {
+    /// Text representation - used for non-numeric values and initial set() calls
+    Text(String),
+    /// Numeric representation - used after first numeric operation to avoid re-parsing
+    Numeric(BigDecimal),
+}
+
+impl FieldInnerValue {
+    /// Create from a string value
+    fn from_string(s: String) -> Self {
+        FieldInnerValue::Text(s)
+    }
+
+    #[cfg(test)]
+    fn as_string(&self) -> String {
+        match self {
+            FieldInnerValue::Text(s) => s.clone(),
+            FieldInnerValue::Numeric(bd) => bd.to_string(),
+        }
+    }
+
+    /// Convert to string for database output
+    fn into_string(self) -> String {
+        match self {
+            FieldInnerValue::Text(s) => s,
+            FieldInnerValue::Numeric(bd) => bd.to_string(),
+        }
+    }
+
+    /// Get or convert to BigDecimal for numeric operations
+    /// Returns a mutable reference to the internal BigDecimal,
+    /// converting from Text if necessary
+    fn as_numeric_mut(&mut self) -> &mut BigDecimal {
+        use std::str::FromStr;
+
+        // If currently Text, parse and convert to Numeric
+        if let FieldInnerValue::Text(s) = self {
+            let bd = BigDecimal::from_str(s).expect("existing value should be valid BigDecimal");
+            *self = FieldInnerValue::Numeric(bd);
+        }
+
+        match self {
+            FieldInnerValue::Numeric(bd) => bd,
+            FieldInnerValue::Text(_) => unreachable!("already converted to Numeric, impossible"),
+        }
     }
 }
 
@@ -332,32 +383,17 @@ pub struct Row {
     /// Verify that we don't try to delete the same row as we're creating it
     operation: Operation,
     /// Map of field name to its value and update operation
-    #[allow(private_interfaces)]
     columns: HashMap<String, FieldValue>,
-
+    /// First ordinal this row was created/modified at, for sorting
     ordinal: u64,
 }
 
 impl Row {
-    /// **Do not use** Now broken, use the `Tables` API instead like `create_row`, `upsert_row`, `update_row`, or `delete_row`.
-    /// Kept for code compilation but it's expected that this was never used in practice.
-    #[deprecated(
-        note = "Do now create a new row manually, use the `Tables` API instead like `create_row`, `upsert_row`, `update_row`, or `delete_row`"
-    )]
-    pub fn new() -> Self {
-        Row {
-            operation: Operation::Unspecified,
-            columns: HashMap::new(),
-            ..Default::default()
-        }
-    }
-
-    pub(crate) fn new_ordered(ordinal: u64) -> Self {
+    fn new(ordinal: u64) -> Self {
         Row {
             operation: Operation::Unspecified,
             columns: HashMap::new(),
             ordinal,
-            ..Default::default()
         }
     }
 
@@ -437,8 +473,6 @@ impl Row {
     /// - No existing: store as Add op (delta)
     /// - Other existing ops (Max/Min/SetIfNull): PANIC (invalid transition)
     fn accumulate_add<T: NumericAddable>(&mut self, name: &str, value: T, subtract: bool) {
-        use std::str::FromStr;
-
         match self.columns.get_mut(name) {
             Some(existing) => {
                 match existing.update_op {
@@ -447,17 +481,16 @@ impl Row {
                         name
                     ),
                     UpdateOp::Set | UpdateOp::Add => {
-                        // Parse existing value to BigDecimal once
-                        let mut target = BigDecimal::from_str(&existing.value)
-                            .expect("existing value should be valid BigDecimal");
+                        // Get or convert to BigDecimal (only parses once!)
+                        let target = existing.value.as_numeric_mut();
 
                         if subtract {
-                            value.sub_assign_from(&mut target);
+                            value.sub_assign_from(target);
                         } else {
-                            value.add_assign_to(&mut target);
+                            value.add_assign_to(target);
                         }
-
-                        existing.value = target.to_string();                    }
+                        // No .to_string() call - stays as BigDecimal!
+                    }
                     UpdateOp::Max => panic!(
                         "cannot call add/sub() on field '{}' after max() - incompatible operations",
                         name
@@ -479,9 +512,10 @@ impl Row {
                     target = -target;
                 }
 
+                // Store directly as Numeric
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(target.to_string(), UpdateOp::Add),
+                    FieldValue::new_numeric(target, UpdateOp::Add),
                 );
             }
         }
@@ -491,7 +525,6 @@ impl Row {
     /// Used with upsert_row() for tracking high values.
     /// Can only follow set() or another max() call on the same field.
     pub fn max<T: NumericComparable>(&mut self, name: &str, value: T) -> &mut Self {
-        use std::str::FromStr;
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
@@ -505,16 +538,12 @@ impl Row {
                         name
                     ),
                     UpdateOp::Set | UpdateOp::Max => {
-                        // Compute the maximum of existing and new values
-                        let existing_bd = BigDecimal::from_str(&existing.value)
-                            .expect("existing value should be valid BigDecimal");
-                        
-                        // Direct comparison - zero allocation for integers!
-                        if value.cmp_to_big_decimal(&existing_bd) == Ordering::Greater {
-                            // New value is greater - update to new value
-                            existing.value = value.to_big_decimal().to_string();
+                        // Get or convert to BigDecimal
+                        let target = existing.value.as_numeric_mut();
+
+                        if value.cmp_to_big_decimal(target) == Ordering::Greater {
+                            *target = value.to_big_decimal();
                         }
-                        // else: existing value is already the maximum, no change needed
                         existing.update_op = UpdateOp::Max;
                     }
                     UpdateOp::Add => panic!(
@@ -535,7 +564,7 @@ impl Row {
                 // No existing value - insert new entry with Max operation
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(value.to_big_decimal().to_string(), UpdateOp::Max),
+                    FieldValue::new_numeric(value.to_big_decimal(), UpdateOp::Max),
                 );
             }
         }
@@ -546,7 +575,6 @@ impl Row {
     /// Used with upsert_row() for tracking low values.
     /// Can only follow set() or another min() call on the same field.
     pub fn min<T: NumericComparable>(&mut self, name: &str, value: T) -> &mut Self {
-        use std::str::FromStr;
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
@@ -560,13 +588,10 @@ impl Row {
                         name
                     ),
                     UpdateOp::Set | UpdateOp::Min => {
-                        // Compute the minimum of existing and new values
-                        let existing_bd = BigDecimal::from_str(&existing.value)
-                            .expect("existing value should be valid BigDecimal");
-
-                        // Direct comparison - zero allocation for integers!
-                        if value.cmp_to_big_decimal(&existing_bd) == Ordering::Less {
-                            existing.value = value.to_big_decimal().to_string();
+                        // Get or convert to BigDecimal
+                        let target = existing.value.as_numeric_mut();
+                        if value.cmp_to_big_decimal(target) == Ordering::Less {
+                            *target = value.to_big_decimal();
                         }
                         existing.update_op = UpdateOp::Min;
                     }
@@ -588,7 +613,7 @@ impl Row {
                 // No existing value - insert new entry with Min operation
                 self.columns.insert(
                     name.to_string(),
-                    FieldValue::with_op(value.to_big_decimal().to_string(), UpdateOp::Min),
+                    FieldValue::new_numeric(value.to_big_decimal(), UpdateOp::Min),
                 );
             }
         }
@@ -665,7 +690,6 @@ impl Row {
     ///
     /// For now, this method should be used with great care as it ties the model
     /// to the database implementation.
-    #[doc(hidden)]
     pub fn set_psql_array<T: ToDatabaseValue>(&mut self, name: &str, value: Vec<T>) -> &mut Row {
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
@@ -690,7 +714,6 @@ impl Row {
     ///
     /// For now, this method should be used with great care as it ties the model
     /// to the database implementation.
-    #[doc(hidden)]
     pub fn set_clickhouse_array<T: ToDatabaseValue>(
         &mut self,
         name: &str,
@@ -913,7 +936,7 @@ mod update_op_tests {
         row.set("balance", "1000");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "1000");
+        assert_eq!(field.value.as_string(), "1000");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -925,7 +948,7 @@ mod update_op_tests {
         row.set("balance", "2000");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "2000");
+        assert_eq!(field.value.as_string(), "2000");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -940,7 +963,7 @@ mod update_op_tests {
         row.add("balance", "100");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -951,7 +974,7 @@ mod update_op_tests {
         row.add("balance", "123.456789");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "123.456789");
+        assert_eq!(field.value.as_string(), "123.456789");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -966,7 +989,7 @@ mod update_op_tests {
         row.sub("balance", "100");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "-100");
+        assert_eq!(field.value.as_string(), "-100");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -977,7 +1000,7 @@ mod update_op_tests {
         row.sub("balance", "-100");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -993,7 +1016,7 @@ mod update_op_tests {
         row.add("balance", "50");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "150");
+        assert_eq!(field.value.as_string(), "150");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -1005,7 +1028,7 @@ mod update_op_tests {
         row.sub("balance", "30");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "70");
+        assert_eq!(field.value.as_string(), "70");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -1017,7 +1040,7 @@ mod update_op_tests {
         row.add("balance", "30");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "-70");
+        assert_eq!(field.value.as_string(), "-70");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -1029,7 +1052,7 @@ mod update_op_tests {
         row.sub("balance", "50");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "-150");
+        assert_eq!(field.value.as_string(), "-150");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -1045,7 +1068,7 @@ mod update_op_tests {
         row.add("total_supply", "500");
 
         let field = row.columns.get("total_supply").unwrap();
-        assert_eq!(field.value, "1000000500");
+        assert_eq!(field.value.as_string(), "1000000500");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -1057,7 +1080,7 @@ mod update_op_tests {
         row.sub("total_supply", "500");
 
         let field = row.columns.get("total_supply").unwrap();
-        assert_eq!(field.value, "999999500");
+        assert_eq!(field.value.as_string(), "999999500");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -1071,7 +1094,7 @@ mod update_op_tests {
         row.sub("total_supply", "50");
 
         let field = row.columns.get("total_supply").unwrap();
-        assert_eq!(field.value, "1000000250");
+        assert_eq!(field.value.as_string(), "1000000250");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -1240,7 +1263,7 @@ mod update_op_tests {
 
         // max() computes max(100, 50) = 100
         let field = row.columns.get("price").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1253,7 +1276,7 @@ mod update_op_tests {
 
         // max() computes max(50, 100) = 100
         let field = row.columns.get("price").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1266,7 +1289,7 @@ mod update_op_tests {
 
         // min() computes min(100, 50) = 50
         let field = row.columns.get("price").unwrap();
-        assert_eq!(field.value, "50");
+        assert_eq!(field.value.as_string(), "50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1279,7 +1302,7 @@ mod update_op_tests {
 
         // min() computes min(50, 100) = 50
         let field = row.columns.get("price").unwrap();
-        assert_eq!(field.value, "50");
+        assert_eq!(field.value.as_string(), "50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1306,11 +1329,11 @@ mod update_op_tests {
         row.add("tx_count", "1");
 
         let balance = row.columns.get("balance").unwrap();
-        assert_eq!(balance.value, "900");
+        assert_eq!(balance.value.as_string(), "900");
         assert_eq!(balance.update_op, UpdateOp::Set);
 
         let tx_count = row.columns.get("tx_count").unwrap();
-        assert_eq!(tx_count.value, "2");
+        assert_eq!(tx_count.value.as_string(), "2");
         assert_eq!(tx_count.update_op, UpdateOp::Add);
     }
 
@@ -1325,7 +1348,7 @@ mod update_op_tests {
         row.max("high_price", 100i64);
 
         let field = row.columns.get("high_price").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1338,7 +1361,7 @@ mod update_op_tests {
 
         // max() now computes the actual maximum in database-changes
         let field = row.columns.get("high_price").unwrap();
-        assert_eq!(field.value, "100"); // Keeps 100 since it's greater than 50
+        assert_eq!(field.value.as_string(), "100"); // Keeps 100 since it's greater than 50
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1350,7 +1373,7 @@ mod update_op_tests {
         row.max("high_price", 100i64);
 
         let field = row.columns.get("high_price").unwrap();
-        assert_eq!(field.value, "100"); // Updates to 100 since it's greater than 50
+        assert_eq!(field.value.as_string(), "100"); // Updates to 100 since it's greater than 50
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1365,7 +1388,7 @@ mod update_op_tests {
         row.min("low_price", 100i64);
 
         let field = row.columns.get("low_price").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1378,7 +1401,7 @@ mod update_op_tests {
 
         // min() now computes the actual minimum in database-changes
         let field = row.columns.get("low_price").unwrap();
-        assert_eq!(field.value, "50"); // Keeps 50 since it's less than 100
+        assert_eq!(field.value.as_string(), "50"); // Keeps 50 since it's less than 100
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1390,7 +1413,7 @@ mod update_op_tests {
         row.min("low_price", 50i64);
 
         let field = row.columns.get("low_price").unwrap();
-        assert_eq!(field.value, "50"); // Updates to 50 since it's less than 100
+        assert_eq!(field.value.as_string(), "50"); // Updates to 50 since it's less than 100
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1405,7 +1428,7 @@ mod update_op_tests {
         row.set_if_null("created_at", "2024-01-01");
 
         let field = row.columns.get("created_at").unwrap();
-        assert_eq!(field.value, "2024-01-01");
+        assert_eq!(field.value.as_string(), "2024-01-01");
         assert_eq!(field.update_op, UpdateOp::SetIfNull);
     }
 
@@ -1418,7 +1441,7 @@ mod update_op_tests {
 
         // set_if_null keeps the first value - subsequent calls are no-ops
         let field = row.columns.get("created_at").unwrap();
-        assert_eq!(field.value, "2024-01-01");
+        assert_eq!(field.value.as_string(), "2024-01-01");
         assert_eq!(field.update_op, UpdateOp::SetIfNull);
     }
 
@@ -1434,7 +1457,7 @@ mod update_op_tests {
         row.add("amount", "0.000000001");
 
         let field = row.columns.get("amount").unwrap();
-        assert_eq!(field.value, "1234567890123456789.123456790");
+        assert_eq!(field.value.as_string(), "1234567890123456789.123456790");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -1447,7 +1470,7 @@ mod update_op_tests {
         row.add("amount", "0.1");
 
         let field = row.columns.get("amount").unwrap();
-        assert_eq!(field.value, "0.3");
+        assert_eq!(field.value.as_string(), "0.3");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -1463,7 +1486,7 @@ mod update_op_tests {
         row.add("balance", "0");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -1475,7 +1498,7 @@ mod update_op_tests {
         row.add("balance", "0");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "100");
+        assert_eq!(field.value.as_string(), "100");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -1487,7 +1510,7 @@ mod update_op_tests {
         row.sub("balance", "100");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "0");
+        assert_eq!(field.value.as_string(), "0");
         assert_eq!(field.update_op, UpdateOp::Add);
     }
 
@@ -1499,7 +1522,7 @@ mod update_op_tests {
         row.sub("balance", "100");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "0");
+        assert_eq!(field.value.as_string(), "0");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -1511,7 +1534,7 @@ mod update_op_tests {
         row.sub("balance", "200");
 
         let field = row.columns.get("balance").unwrap();
-        assert_eq!(field.value, "-100");
+        assert_eq!(field.value.as_string(), "-100");
         assert_eq!(field.update_op, UpdateOp::Set);
     }
 
@@ -1568,7 +1591,7 @@ mod update_op_tests {
         row.max("value", 200i64);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "200");
+        assert_eq!(field.value.as_string(), "200");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1581,7 +1604,7 @@ mod update_op_tests {
         row.min("value", 200i64);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "50");
+        assert_eq!(field.value.as_string(), "50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1594,7 +1617,7 @@ mod update_op_tests {
         row.max("value", 200u32);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "200");
+        assert_eq!(field.value.as_string(), "200");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1607,7 +1630,7 @@ mod update_op_tests {
         row.min("value", 200u32);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "50");
+        assert_eq!(field.value.as_string(), "50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1620,7 +1643,7 @@ mod update_op_tests {
         row.max("value", 200i32);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "200");
+        assert_eq!(field.value.as_string(), "200");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1633,7 +1656,7 @@ mod update_op_tests {
         row.min("value", 200i32);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "-50");
+        assert_eq!(field.value.as_string(), "-50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1646,7 +1669,7 @@ mod update_op_tests {
         row.max("value", 200i32);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "200");
+        assert_eq!(field.value.as_string(), "200");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1659,7 +1682,7 @@ mod update_op_tests {
         row.min("value", 200i32);
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "50");
+        assert_eq!(field.value.as_string(), "50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1673,7 +1696,7 @@ mod update_op_tests {
         row.max("value", BigDecimal::from_str("200.75").unwrap());
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "200.75");
+        assert_eq!(field.value.as_string(), "200.75");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1687,7 +1710,7 @@ mod update_op_tests {
         row.min("value", BigDecimal::from_str("200.75").unwrap());
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "50.25");
+        assert_eq!(field.value.as_string(), "50.25");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1700,7 +1723,7 @@ mod update_op_tests {
         row.max("value", BigInt::from(200));
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "200");
+        assert_eq!(field.value.as_string(), "200");
         assert_eq!(field.update_op, UpdateOp::Max);
     }
 
@@ -1713,7 +1736,7 @@ mod update_op_tests {
         row.min("value", BigInt::from(200));
 
         let field = row.columns.get("value").unwrap();
-        assert_eq!(field.value, "50");
+        assert_eq!(field.value.as_string(), "50");
         assert_eq!(field.update_op, UpdateOp::Min);
     }
 
@@ -1723,20 +1746,20 @@ mod update_op_tests {
 
     #[test]
     fn verify_integer_comparison_semantics() {
-        use std::str::FromStr;
         use crate::numeric::NumericComparable;
-        
+        use std::str::FromStr;
+
         let bd_100 = BigDecimal::from_str("100").unwrap();
-        
+
         // Test: 50 < 100 should return Less
         assert_eq!(50i64.cmp_to_big_decimal(&bd_100), Ordering::Less);
-        
+
         // Test: 200 > 100 should return Greater
         assert_eq!(200i64.cmp_to_big_decimal(&bd_100), Ordering::Greater);
-        
+
         // Test: 100 == 100 should return Equal
         assert_eq!(100i64.cmp_to_big_decimal(&bd_100), Ordering::Equal);
-        
+
         // Test with negative numbers
         assert_eq!((-50i32).cmp_to_big_decimal(&bd_100), Ordering::Less);
     }
