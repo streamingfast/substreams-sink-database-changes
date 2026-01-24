@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-##
+## [4.0.0]
 
 * The `crate::pb::sf::substreams::sink::database::v1` package has been deprecated, use the full name like any other Protobuf packages we usually provide and which is now at `crate::pb::sf
 
@@ -26,6 +26,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
       field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
     };
     ```
+
+    *Note*: There is currently no deprecation notice for this as it triggers deprecation notices even inside our own code.
+
+* Add support for delta update operations (`add`/`sub`/`min`/`max`/`set_if_null`) on rows:
+
+  ```rust
+  tables.upsert_row("Account", id)
+      .set("owner", owner)
+      .add("balance", 100i64)      // column = COALESCE(column, 0) + 100
+      .sub("debt", 50i64)          // column = COALESCE(column, 0) - 50
+      .max("high_score", score)    // column = GREATEST(column, score)
+      .min("best_time", duration)  // column = LEAST(column, duration)
+      .set_if_null("created_at", timestamp); // column = COALESCE(column, timestamp)
+  ```
+
+  Requires latest [substreams-sink-sql](https://github.com/streamingfast/substreams-sink-sql) version for this to be supported correctly.
 
 ## [3.0.0]
 

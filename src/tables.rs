@@ -430,16 +430,8 @@ impl Row {
         if self.operation == Operation::Delete {
             panic!("cannot set fields on a delete operation")
         }
-        // Check if field already has a non-Set operation - can't go back to Set
-        if let Some(existing) = self.columns.get(name) {
-            if existing.update_op != UpdateOp::Set {
-                panic!(
-                    "cannot call set() on field '{}' after {}() - set() must be called first",
-                    name,
-                    existing.update_op.as_display_name(),
-                )
-            }
-        }
+        // set() can always be called - it resets the field to a new value
+        // This allows sequences like: set -> add -> set (resets the accumulated value)
         self.columns
             .insert(name.to_string(), FieldValue::new(value.to_value()));
         self
@@ -1099,43 +1091,59 @@ mod update_op_tests {
     }
 
     // ============================================================
-    // Disallowed transitions - set() cannot follow other ops
+    // set() can always reset a field - allowed transitions from any op
     // ============================================================
 
     #[test]
-    #[should_panic(expected = "cannot call set() on field 'balance' after add/sub()")]
-    fn add_then_set_panics() {
+    fn add_then_set_resets_value() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.add("balance", "100");
-        row.set("balance", "999"); // Should panic
+        row.set("balance", "999");
+
+        // set() resets the field completely
+        let field = row.columns.get("balance").unwrap();
+        assert_eq!(field.value.as_string(), "999");
+        assert_eq!(field.update_op, UpdateOp::Set);
     }
 
     #[test]
-    #[should_panic(expected = "cannot call set() on field 'price' after max()")]
-    fn max_then_set_panics() {
+    fn max_then_set_resets_value() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.max("price", 100i64);
-        row.set("price", "999"); // Should panic
+        row.set("price", "999");
+
+        // set() resets the field completely
+        let field = row.columns.get("price").unwrap();
+        assert_eq!(field.value.as_string(), "999");
+        assert_eq!(field.update_op, UpdateOp::Set);
     }
 
     #[test]
-    #[should_panic(expected = "cannot call set() on field 'price' after min()")]
-    fn min_then_set_panics() {
+    fn min_then_set_resets_value() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.min("price", 100i64);
-        row.set("price", "999"); // Should panic
+        row.set("price", "999");
+
+        // set() resets the field completely
+        let field = row.columns.get("price").unwrap();
+        assert_eq!(field.value.as_string(), "999");
+        assert_eq!(field.update_op, UpdateOp::Set);
     }
 
     #[test]
-    #[should_panic(expected = "cannot call set() on field 'created' after set_if_null()")]
-    fn set_if_null_then_set_panics() {
+    fn set_if_null_then_set_resets_value() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set_if_null("created", "2024-01-01");
-        row.set("created", "2024-02-01"); // Should panic
+        row.set("created", "2024-02-01");
+
+        // set() resets the field completely
+        let field = row.columns.get("created").unwrap();
+        assert_eq!(field.value.as_string(), "2024-02-01");
+        assert_eq!(field.update_op, UpdateOp::Set);
     }
 
     // ============================================================
