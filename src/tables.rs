@@ -632,14 +632,10 @@ impl Row {
                         "cannot call set_if_null() on field '{}' after unspecified - incompatible operations",
                         name
                     ),
-                    UpdateOp::SetIfNull => {
-                        // Keep first value - subsequent calls are no-op
-                        // No changes needed to existing
+                    UpdateOp::Set | UpdateOp::SetIfNull => {
+                        // After set() or set_if_null(), the value is already determined
+                        // Keep the existing value - subsequent set_if_null() calls are no-op
                     }
-                    UpdateOp::Set => panic!(
-                        "cannot call set_if_null() on field '{}' after set() - incompatible operations",
-                        name
-                    ),
                     UpdateOp::Add => panic!(
                         "cannot call set_if_null() on field '{}' after add/sub() - incompatible operations",
                         name
@@ -1315,12 +1311,16 @@ mod update_op_tests {
     }
 
     #[test]
-    #[should_panic(expected = "cannot call set_if_null() on field 'created' after set()")]
-    fn set_then_set_if_null_panics() {
+    fn set_then_set_if_null_is_noop() {
         let mut tables = Tables::new();
         let row = tables.upsert_row("test", "pk1");
         row.set("created", "2024-01-01");
-        row.set_if_null("created", "2024-02-01"); // Should panic
+        row.set_if_null("created", "2024-02-01"); // Should be no-op
+
+        // set() value is kept, set_if_null() is ignored
+        let field = row.columns.get("created").unwrap();
+        assert_eq!(field.value.as_string(), "2024-01-01");
+        assert_eq!(field.update_op, UpdateOp::Set);
     }
 
     // ============================================================
