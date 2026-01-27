@@ -6,29 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [4.0.0]
 
-* The `crate::pb::sf::substreams::sink::database::v1` package has been deprecated, use the full name like any other Protobuf packages we usually provide and which is now at `crate::pb::sf
-
-  Usually migrating is a single matter of a search/replace across your codebase:
-  - Replace all `substreams_database_change::pb::database::` by `substreams_database_change::pb::sf::substreams::sink::database::v1::`
-
-    So for example this code:
-
-    ```rust
-    use substreams_database_change::pb::database::{
-      field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
-    };
-    ```
-
-    Needs to become:
-
-    ```rust
-    use substreams_database_change::pb::sf::substreams::sink::database::v1::{
-      field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
-    };
-    ```
-
-    *Note*: There is currently no deprecation notice for this as it triggers deprecation notices even inside our own code.
-
 * Add support for delta update operations (`add`/`sub`/`min`/`max`/`set_if_null`) on rows:
 
   ```rust
@@ -42,6 +19,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ```
 
   Requires latest [substreams-sink-sql](https://github.com/streamingfast/substreams-sink-sql) version for this to be supported correctly.
+
+### Deprecations
+
+* The `crate::pb::sf::substreams::sink::database::v1` package has been deprecated, use the full name like any other Protobuf packages we usually provide and which is now at `crate::pb::sf
+
+  Usually migrating is a single matter of a search/replace across your codebase:
+  - Replace all `substreams_database_change::pb::database::` by `substreams_database_change::pb::sf::substreams::sink::database::v1::`
+
+    So for example this code:
+
+    ```rust
+    use substreams_database_change::pb::database::{
+      field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
+    };
+    ```
+
+    Should become:
+
+    ```rust
+    use substreams_database_change::pb::sf::substreams::sink::database::v1::{
+      field::UpdateOp, table_change::Operation, DatabaseChanges, Field, TableChange,
+    };
+    ```
 
 ## [3.0.0]
 
