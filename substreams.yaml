@@ -1,7 +1,7 @@
 specVersion: v0.1.0
 package:
   name: substreams_sink_database_changes
-  version: v3.0.0
+  version: v4.0.0
   url: https://github.com/streamingfast/substreams-sink-database-changes
   doc: Contains all the definitions for the database changes which can be emitted by a Substreams.
 

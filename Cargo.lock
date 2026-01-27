@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "substreams-database-change"
-version = "4.0.0-beta.1"
+version = "4.0.0"
 dependencies = [
  "pretty_assertions",
  "prost",
