@@ -44,8 +44,23 @@ impl_as_string_via_to_string!(BigDecimal);
 impl_as_string_via_to_string!(&BigDecimal);
 impl_as_string_via_to_string!(BigInt);
 impl_as_string_via_to_string!(&BigInt);
-impl_as_string_via_to_string!(::prost_types::Timestamp);
-impl_as_string_via_to_string!(&::prost_types::Timestamp);
+impl AsString for ::buffa_types::google::protobuf::Timestamp {
+    fn as_string(self) -> String {
+        timestamp_to_string(&self)
+    }
+}
+
+impl AsString for &::buffa_types::google::protobuf::Timestamp {
+    fn as_string(self) -> String {
+        timestamp_to_string(self)
+    }
+}
+
+/// Formats a `Timestamp` as RFC 3339, the representation sinks receive.
+pub(crate) fn timestamp_to_string(value: &::buffa_types::google::protobuf::Timestamp) -> String {
+    ::buffa::json_helpers::wkt::fmt_timestamp(value.seconds, value.nanos)
+        .unwrap_or_else(|err| panic!("invalid timestamp: {err}"))
+}
 
 impl<T: AsRef<[u8]>> AsString for Hex<T> {
     fn as_string(self) -> String {
@@ -76,7 +91,7 @@ impl<T: AsString> ToField for (T, T) {
         Field {
             name: name.as_ref().to_string(),
             value: self.1.as_string(),
-            update_op: UpdateOp::Set as i32,
+            update_op: UpdateOp::Set.into(),
         }
     }
 }
@@ -88,7 +103,7 @@ impl<T: AsString> ToField for (Option<T>, T) {
             (None, new) => Field {
                 name: name.as_ref().to_string(),
                 value: new.as_string(),
-                update_op: UpdateOp::Set as i32,
+                update_op: UpdateOp::Set.into(),
             },
         }
     }
@@ -101,7 +116,7 @@ impl<T: AsString> ToField for (T, Option<T>) {
             (_old, None) => Field {
                 name: name.as_ref().to_string(),
                 value: "".to_string(),
-                update_op: UpdateOp::Set as i32,
+                update_op: UpdateOp::Set.into(),
             },
         }
     }
@@ -306,7 +321,7 @@ mod test {
     fn create_expected_field<N: AsRef<str>>(name: N, value: Option<String>) -> Field {
         let mut field = Field {
             name: name.as_ref().to_string(),
-            update_op: UpdateOp::Set as i32,
+            update_op: UpdateOp::Set.into(),
             value: "".to_string(),
         };
         if value.is_some() {

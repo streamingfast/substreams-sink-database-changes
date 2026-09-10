@@ -43,7 +43,7 @@ impl TableChange {
             table: entity.as_ref().to_string(),
             primary_key: Some(PrimaryKey::Pk(pk.as_ref().to_string())),
             ordinal,
-            operation: operation as i32,
+            operation: operation.into(),
             fields: vec![],
         }
     }
@@ -56,9 +56,11 @@ impl TableChange {
     ) -> TableChange {
         TableChange {
             table: entity.as_ref().to_string(),
-            primary_key: Some(PrimaryKey::CompositePk(CompositePrimaryKey { keys })),
+            primary_key: Some(PrimaryKey::CompositePk(Box::new(CompositePrimaryKey {
+                keys: keys.into_iter().collect(),
+            }))),
             ordinal,
-            operation: operation as i32,
+            operation: operation.into(),
             fields: vec![],
         }
     }
