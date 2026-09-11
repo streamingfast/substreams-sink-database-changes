@@ -27,8 +27,9 @@ main() {
   check_sd
   check_git_clean
 
+  # The crate's own version only. A dependency pinned in the inline
+  # `version = "..."` shape keeps whatever it declares.
   sd '^version = ".*?"$' "version = \"${version}\"" Cargo.toml
-  sd 'version = ".*?",' "version = \"${version}\"," Cargo.toml
   sd 'version: v.*' "version: v${version}" substreams.yaml
   sd '## Unreleased' "## [${version}](https://${repository}/releases/tag/v${version})" CHANGELOG.md
 

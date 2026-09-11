@@ -14,7 +14,7 @@ categories = ["api-bindings", "external-ffi-bindings", "wasm"]
 [dependencies]
 buffa = { version = "0.9", default-features = false, features = ["std", "fast-utf8", "json"] }
 buffa-types = { version = "0.9", default-features = false, features = ["std"] }
-substreams = { version = "0.7.3", git = "https://github.com/streamingfast/substreams-rs", branch = "feature/buffa" }
+substreams = { version = "0.8.0-beta" }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

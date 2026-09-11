@@ -411,8 +411,9 @@ dependencies = [
 
 [[package]]
 name = "substreams"
-version = "0.7.6"
-source = "git+https://github.com/streamingfast/substreams-rs?branch=feature%2Fbuffa#16c47736590b5ba18ade5e8de0ccceceae7c6a36"
+version = "0.8.0-beta"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaef81ed6637d159f8e55ca4b2def8b6023807d121589969ce4627256de1f33a"
 dependencies = [
  "anyhow",
  "bigdecimal",
@@ -443,8 +444,9 @@ dependencies = [
 
 [[package]]
 name = "substreams-macro"
-version = "0.7.6"
-source = "git+https://github.com/streamingfast/substreams-rs?branch=feature%2Fbuffa#16c47736590b5ba18ade5e8de0ccceceae7c6a36"
+version = "0.8.0-beta"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90d8ab968b9449ab3c7b9514c73f328a43294bca0cc0f1bf7f31f63e4b25723d"
 dependencies = [
  "proc-macro2",
  "quote",
