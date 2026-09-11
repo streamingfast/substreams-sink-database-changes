@@ -12,9 +12,9 @@ keywords = ["substreams", "streamingfast", "firehose", "thegraph", "entity"]
 categories = ["api-bindings", "external-ffi-bindings", "wasm"]
 
 [dependencies]
-prost = "0.13"
-prost-types = "0.13"
-substreams = "0.7.3"
+buffa = { version = "0.9", default-features = false, features = ["std", "fast-utf8", "json"] }
+buffa-types = { version = "0.9", default-features = false, features = ["std"] }
+substreams = { version = "0.8.0-beta" }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
