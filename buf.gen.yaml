@@ -8,7 +8,6 @@ plugins:
     opt:
       - lazy_views=true
       - unknown_fields=false
-      - idiomatic_field_names=true
 
   - name: go
     out: pb
