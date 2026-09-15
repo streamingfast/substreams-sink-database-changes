@@ -24,8 +24,8 @@ cargo add substreams-database-change
 
 ```toml
 [dependencies]
-substreams = "0.7"
-substreams-database-change = "4.0"
+substreams = "0.8.0-beta"
+substreams-database-change = "5.0.0-beta.1"
 ```
 
 **src/lib.rs**
@@ -99,7 +99,7 @@ The `.set()` method automatically converts many Rust types to database-compatibl
 - `bool`
 - `String`, `&str`
 - `BigInt`, `BigDecimal` (from `substreams::scalar`)
-- `prost_types::Timestamp`
+- `buffa_types::google::protobuf::Timestamp`
 - `Vec<u8>`, `Hex<T>` (as hex strings)
 
 Custom types can implement the `ToDatabaseValue` trait for custom conversion.
