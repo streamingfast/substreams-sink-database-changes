@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 5.0.0-beta.1
+## Unreleased
 
 * **Breaking** Switched protobuf encoding and decoding from `prost` to [buffa](https://github.com/anthropics/buffa), `prost` is no longer a dependency.
 
@@ -21,7 +21,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   tables.create_row("t", key).set("when", buffa_types::google::protobuf::Timestamp { seconds, nanos, ..Default::default() });
   ```
 
-* **Breaking** Changed `UpdateOp::as_display_name` to match on the schema's variant names (`UPDATE_OP_SET`), which buffa generates. The prost-style names (`UpdateOp::Set`) remain available as associated constants, so expressions using them are unaffected; only `match` patterns need updating. The strings returned are unchanged.
+* **Breaking** Changed `UpdateOp::as_display_name` to match on the schema's variant names (`UPDATE_OP_SET`), which buffa generates. The strings returned are unchanged.
+
+  buffa names a variant as the `.proto` declares it, so `UpdateOp::Set` becomes
+  `UpdateOp::UPDATE_OP_SET`:
+
+  ```rust
+  // before                    // after
+  UpdateOp::Unspecified   ->   UpdateOp::UPDATE_OP_UNSPECIFIED
+  UpdateOp::Add           ->   UpdateOp::UPDATE_OP_ADD
+  UpdateOp::Max           ->   UpdateOp::UPDATE_OP_MAX
+  UpdateOp::Min           ->   UpdateOp::UPDATE_OP_MIN
+  UpdateOp::SetIfNull     ->   UpdateOp::UPDATE_OP_SET_IF_NULL
+  UpdateOp::Set           ->   UpdateOp::UPDATE_OP_SET
+  ```
+
+  The old names stay as `pub const` aliases of the new ones, so existing code keeps compiling and
+  the rename is optional. Prefer the schema names in new code.
 
 * Changed `pb` generation to the `buf.build/anthropics/buffa` plugin, pinned at `v0.9.2` in `buf.gen.yaml`. Go generation is unchanged.
 
