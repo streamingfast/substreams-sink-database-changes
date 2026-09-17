@@ -28,7 +28,6 @@ main() {
   check_git_clean
 
   sd '^version = ".*?"$' "version = \"${version}\"" Cargo.toml
-  sd 'version = ".*?",' "version = \"${version}\"," Cargo.toml
   sd 'version: v.*' "version: v${version}" substreams.yaml
   sd '## Unreleased' "## [${version}](https://${repository}/releases/tag/v${version})" CHANGELOG.md
 

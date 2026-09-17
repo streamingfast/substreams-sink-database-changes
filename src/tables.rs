@@ -208,7 +208,7 @@ impl Tables {
                     change.fields.push(Field {
                         name: field,
                         value: field_value.value.into_string(),
-                        update_op: field_value.update_op as i32,
+                        update_op: field_value.update_op.into(),
                     });
                 }
 
@@ -756,8 +756,17 @@ impl_to_database_value_proxy_to_string!(u16);
 impl_to_database_value_proxy_to_string!(u32);
 impl_to_database_value_proxy_to_string!(u64);
 impl_to_database_value_proxy_to_string!(bool);
-impl_to_database_value_proxy_to_string!(::prost_types::Timestamp);
-impl_to_database_value_proxy_to_string!(&::prost_types::Timestamp);
+impl ToDatabaseValue for ::buffa_types::google::protobuf::Timestamp {
+    fn to_value(self) -> String {
+        crate::change::timestamp_to_string(&self)
+    }
+}
+
+impl ToDatabaseValue for &::buffa_types::google::protobuf::Timestamp {
+    fn to_value(self) -> String {
+        crate::change::timestamp_to_string(self)
+    }
+}
 impl_to_database_value_proxy_to_string!(&str);
 impl_to_database_value_proxy_to_string!(BigDecimal);
 impl_to_database_value_proxy_to_string!(&BigDecimal);
@@ -809,9 +818,10 @@ mod test {
     #[test]
     fn to_database_value_proto_timestamp() {
         assert_eq!(
-            ToDatabaseValue::to_value(::prost_types::Timestamp {
+            ToDatabaseValue::to_value(::buffa_types::google::protobuf::Timestamp {
                 seconds: 60 * 60 + 60 + 1,
-                nanos: 1
+                nanos: 1,
+                ..Default::default()
             }),
             "1970-01-01T01:01:01.000000001Z"
         );
@@ -894,14 +904,14 @@ mod test {
         TableChange {
             table: name.to_string(),
             ordinal,
-            operation: 1,
+            operation: crate::pb::sf::substreams::sink::database::v1::table_change::Operation::OPERATION_CREATE.into(),
             fields: [].into(),
             primary_key: Some(match key.into() {
                 PrimaryKey::Single(pk) => PrimaryKeyProto::Pk(pk),
                 PrimaryKey::Composite(keys) => {
-                    PrimaryKeyProto::CompositePk(CompositePrimaryKeyProto {
+                    PrimaryKeyProto::CompositePk(Box::new(CompositePrimaryKeyProto {
                         keys: keys.into_iter().collect(),
-                    })
+                    }))
                 }
             }),
         }
@@ -1578,12 +1588,12 @@ mod update_op_tests {
         // Find balance field
         let balance_field = change.fields.iter().find(|f| f.name == "balance").unwrap();
         assert_eq!(balance_field.value, "100");
-        assert_eq!(balance_field.update_op, UpdateOp::Add as i32);
+        assert_eq!(balance_field.update_op, UpdateOp::Add);
 
         // Find name field
         let name_field = change.fields.iter().find(|f| f.name == "name").unwrap();
         assert_eq!(name_field.value, "MyToken");
-        assert_eq!(name_field.update_op, UpdateOp::Set as i32);
+        assert_eq!(name_field.update_op, UpdateOp::Set);
     }
 
     // ============================================================

@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+* **Breaking** Switched protobuf encoding and decoding from `prost` to [buffa](https://github.com/anthropics/buffa), `prost` is no longer a dependency.
+
+  The wire format is unchanged. Encoding the same `Tables` construction produces the same bytes as 4.0.0, including composite primary keys, every `UpdateOp` variant and timestamps.
+
+  Generated types differ from `prost` in three ways: enum fields are `EnumValue<E>` rather than `i32` (compare against the variant directly), singular message fields are `MessageField<T>` rather than `Option<T>` and deref to a default instance, and encoding is infallible.
+
+  **Breaking** `buffa`'s `Timestamp` has no `Display` implementation, so code calling `.to_string()` on a `prost_types::Timestamp` directly no longer compiles. Passing a timestamp to `set()` or any other `ToDatabaseValue`/`AsString` position is unaffected and still yields the same RFC 3339 string:
+
+  ```rust
+  // before
+  tables.create_row("t", key).set("when", prost_types::Timestamp { seconds, nanos });
+  // after
+  tables.create_row("t", key).set("when", buffa_types::google::protobuf::Timestamp { seconds, nanos, ..Default::default() });
+  ```
+
+* **Breaking** Changed `UpdateOp::as_display_name` to match on the schema's variant names (`UPDATE_OP_SET`), which buffa generates. The strings returned are unchanged.
+
+  buffa names a variant as the `.proto` declares it, so `UpdateOp::Set` becomes
+  `UpdateOp::UPDATE_OP_SET`:
+
+  ```rust
+  // before                    // after
+  UpdateOp::Unspecified   ->   UpdateOp::UPDATE_OP_UNSPECIFIED
+  UpdateOp::Add           ->   UpdateOp::UPDATE_OP_ADD
+  UpdateOp::Max           ->   UpdateOp::UPDATE_OP_MAX
+  UpdateOp::Min           ->   UpdateOp::UPDATE_OP_MIN
+  UpdateOp::SetIfNull     ->   UpdateOp::UPDATE_OP_SET_IF_NULL
+  UpdateOp::Set           ->   UpdateOp::UPDATE_OP_SET
+  ```
+
+  The old names stay as `pub const` aliases of the new ones, so existing code keeps compiling and
+  the rename is optional. Prefer the schema names in new code.
+
+* Changed `pb` generation to the `buf.build/anthropics/buffa` plugin, pinned at `v0.9.2` in `buf.gen.yaml`. Go generation is unchanged.
+
 ## [4.0.0]
 
 * Add support for delta update operations (`add`/`sub`/`min`/`max`/`set_if_null`) on rows:

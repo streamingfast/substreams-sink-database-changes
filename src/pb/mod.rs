@@ -63,12 +63,12 @@ include!("pb.rs");
 impl UpdateOp {
     pub fn as_display_name(&self) -> &'static str {
         match self {
-            UpdateOp::Unspecified => "unspecified",
-            UpdateOp::Add => "add/sub",
-            UpdateOp::Max => "max",
-            UpdateOp::Min => "min",
-            UpdateOp::SetIfNull => "set_if_null",
-            UpdateOp::Set => "set",
+            UpdateOp::UPDATE_OP_UNSPECIFIED => "unspecified",
+            UpdateOp::UPDATE_OP_ADD => "add/sub",
+            UpdateOp::UPDATE_OP_MAX => "max",
+            UpdateOp::UPDATE_OP_MIN => "min",
+            UpdateOp::UPDATE_OP_SET_IF_NULL => "set_if_null",
+            UpdateOp::UPDATE_OP_SET => "set",
         }
     }
 }
