@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 * **Breaking** Switched protobuf encoding and decoding from `prost` to [buffa](https://github.com/anthropics/buffa), `prost` is no longer a dependency.
 
-  The wire format is unchanged. Encoding the same `Tables` construction produces the same bytes as 4.0.0, including composite primary keys, every `UpdateOp` variant and timestamps.
+  The wire format is unchanged. Encoding the same `Tables` construction produces the same message as 4.0.0, including composite primary keys, every `UpdateOp` variant and timestamps. Field order within a row is not stable in either version, since `Row` holds its columns in a `HashMap`.
 
   Generated types differ from `prost` in three ways: enum fields are `EnumValue<E>` rather than `i32` (compare against the variant directly), singular message fields are `MessageField<T>` rather than `Option<T>` and deref to a default instance, and encoding is infallible.
 
@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   // after
   tables.create_row("t", key).set("when", buffa_types::google::protobuf::Timestamp { seconds, nanos, ..Default::default() });
   ```
+
+  A `Timestamp` whose `nanos` fall outside `0..=999_999_999`, or whose `seconds` fall outside year 1 to 9999, now panics instead of being silently corrected. `prost` normalized an out-of-range `nanos` by carrying it into `seconds`, so `{ seconds: 1700000000, nanos: -1 }` formatted as `2023-11-14T22:13:19.999999999Z`; buffa rejects it. Values a chain produces are unaffected — a block timestamp carries `nanos: 0` — but a hand-built `Timestamp` derived by arithmetic must be normalized before it reaches `set()`.
 
 * **Breaking** Changed `UpdateOp::as_display_name` to match on the schema's variant names (`UPDATE_OP_SET`), which buffa generates. The strings returned are unchanged.
 
