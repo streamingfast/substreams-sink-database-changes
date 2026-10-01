@@ -411,9 +411,9 @@ dependencies = [
 
 [[package]]
 name = "substreams"
-version = "0.8.0-beta"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aaef81ed6637d159f8e55ca4b2def8b6023807d121589969ce4627256de1f33a"
+checksum = "c2191a986c9f1177ae5eb9b6f8881e0615fee7ccf84f0c0438c4a2d10bac85b5"
 dependencies = [
  "anyhow",
  "bigdecimal",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "substreams-database-change"
-version = "5.0.0-beta.1"
+version = "5.0.0"
 dependencies = [
  "buffa",
  "buffa-types",
@@ -444,9 +444,9 @@ dependencies = [
 
 [[package]]
 name = "substreams-macro"
-version = "0.8.0-beta"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90d8ab968b9449ab3c7b9514c73f328a43294bca0cc0f1bf7f31f63e4b25723d"
+checksum = "7d473bf3565300988e84da91727d9b3a1626509983b9aa767ffba16fb22f3a22"
 dependencies = [
  "proc-macro2",
  "quote",
