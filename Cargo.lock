@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "substreams-database-change"
-version = "5.0.0-beta.1"
+version = "5.0.0"
 dependencies = [
  "buffa",
  "buffa-types",
